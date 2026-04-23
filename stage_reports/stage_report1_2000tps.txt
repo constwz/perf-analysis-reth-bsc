@@ -1,0 +1,605 @@
+========================================================================================
+  stage_01_<=200tps   (883 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=     0.9  p50=     1  p95=     1  p99=     2  p999=    75  max=    75
+  build_duration_ms               : avg=     3.0ms  p50=     1ms  p95=    13ms  p99=    20ms  p999=    39ms  max=    39ms
+  prepare_duration_ms             : avg=     0.4ms  p50=     0ms  p95=     2ms  p99=     6ms  p999=    13ms  max=    13ms
+  trie_root_duration_ms           : avg=     2.0ms  p50=     1ms  p95=    10ms  p99=    17ms  p999=    28ms  max=    28ms
+  avg_tx_duration_micros (misleading!): avg=  3032.9us  p50=  1976us  p95= 13086us  p99= 19583us  p999= 31480us  max= 31480us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/883 (0.0%)
+  deadline_used_pct               : avg=     0.3%  p50=     0%  p95=     2%  p99=     4%  p999=     8%  max=     8%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=     2.2ms  p50= 1.214ms  p95=10.328ms  p99=16.573ms  p999=28.172ms  max=28.172ms
+  executor_finish                 : avg=     0.4ms  p50= 0.355ms  p95=   0.5ms  p99= 2.594ms  p999= 8.479ms  max= 8.479ms
+  merge_transitions               : avg=     0.0ms  p50= 0.007ms  p95=  0.01ms  p99= 0.021ms  p999= 0.286ms  max= 0.286ms
+  hashed_post_state               : avg=     0.9ms  p50= 0.037ms  p95= 7.301ms  p99=15.083ms  p999=19.257ms  max=19.257ms
+  prefetcher_finish               : avg=     0.4ms  p50= 0.262ms  p95= 0.817ms  p99= 1.998ms  p999=  15.3ms  max=  15.3ms
+  to_triedb_state                 : avg=     0.0ms  p50= 0.004ms  p95= 0.007ms  p99= 0.013ms  p999=  0.05ms  max=  0.05ms
+  triedb_calc                     : avg=     1.0ms  p50= 0.803ms  p95= 1.944ms  p99=  4.29ms  p999=14.128ms  max=14.128ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    53.2ms  p50=     0ms  p95=   406ms  p99=   465ms  p999=   527ms  max=   527ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     2ms  max=     2ms
+  intermediate_inner_ms           : avg=    45.9ms  p50=     0ms  p95=   358ms  p99=   413ms  p999=   474ms  max=   474ms
+  commit_ms                       : avg=     7.1ms  p50=     0ms  p95=    48ms  p99=    64ms  p999=   157ms  max=   157ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=  2541.6  p50=     0  p95= 17742  p99= 30002  p999= 42817  max= 42817
+  resolve_difflayer_hit           : avg=   984.8  p50=     0  p95=  6932  p99= 10229  p999= 15583  max= 15583
+  resolve_fallthrough             : avg=  1556.7  p50=     0  p95= 10765  p99= 18702  p999= 27234  max= 27234
+  difflayer_filter_pct            : avg=     9.0%  p50=     0%  p95=    42%  p99=    88%  p999=   100%  max=   100%
+  difflayer_chain_depth           : avg=   270.1  p50=   270  p95=   292  p99=   306  p999=   312  max=   312
+  difflayer_total_nodes           : avg=3323370.0  p50=3317123  p95=5849646  p99=6167657  p999=6364504  max=6364504
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 35.9%  (491745 hits / 1371512 total)
+  cache_hits per block            : avg=   558.2  p50=     0  p95=  2851  p99= 12965  p999= 18546  max= 18546
+  cache_misses per block          : avg=   998.6  p50=     0  p95=  7786  p99=  8598  p999= 10435  max= 10435
+  acct_misses (account trie)      : avg=   239.5  p50=     0  p95=  1851  p99=  2131  p999=  2602  max=  2602
+  stor_misses (storage trie)      : avg=   759.1  p50=     0  p95=  5943  p99=  6407  p999=  7833  max=  7833
+
+[per-phase misses]
+  state_at_misses                 : avg=     0.3  p50=     0  p95=     0  p99=    19  p999=    39  max=    39
+  intermediate_misses             : avg=   991.3  p50=     0  p95=  7762  p99=  8485  p999= 10424  max= 10424
+  commit_misses                   : avg=     7.0  p50=     0  p95=     0  p99=   119  p999=  2963  max=  2963
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=    26.9ms  p50=     0ms  p95=   211ms  p99=   244ms  p999=   282ms  max=   282ms
+  update_account_trie_ms (SERIAL) : avg=    17.5ms  p50=     0ms  p95=   140ms  p99=   166ms  p999=   190ms  max=   190ms
+  account_hash_ms                 : avg=     1.4ms  p50=     0ms  p95=    10ms  p99=    13ms  p999=    28ms  max=    28ms
+  account_count                   : avg=   170.2  p50=     1  p95=  1234  p99=  1380  p999=  1619  max=  1619
+
+[commit_inner]
+  commit_state_objects_ms         : avg=     6.7ms  p50=     0ms  p95=    46ms  p99=    60ms  p999=   155ms  max=   155ms
+  storage_tries_count             : avg=     6.7  p50=     1  p95=    37  p99=    37  p999=    38  max=    38
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=24542091.2  p50=25598188  p95=28471023  p99=28471112  p999=28471112  max=28471112
+  node_insert_attempted           : avg=  5767.9  p50=    14  p95= 25516  p99= 27335  p999= 31753  max= 31753
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.5us  p50=     1us  p95=     1us  p99=     1us  p999=     1us  max=     1us
+  evm_transact_us                 : avg=   507.2us  p50=   730us  p95=   780us  p99=   780us  p999=   780us  max=   780us
+  state_clone_us                  : avg=     1.0us  p50=     1us  p95=     2us  p99=     2us  p999=     2us  max=     2us
+  prefetcher_hook_us              : avg=     7.0us  p50=     8us  p95=    11us  p99=    11us  p999=    11us  max=    11us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     3.2us  p50=     3us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=     7.2ms  p50=     4ms  p95=    21ms  p99=    21ms  p999=    21ms  max=    21ms
+  total_prefetcher_hook_ms        : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  total_commit_ms                 : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  exec_duration_ms (loop total)   : avg=     7.8ms  p50=     5ms  p95=    22ms  p99=    22ms  p999=    22ms  max=    22ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=    84.6%  p50=   100%  p95=   150%  p99=   150%  p999=   150%  max=   150%
+  needed_storage_accounts         : avg=     1.8  p50=     2  p95=     2  p99=     3  p999=    35  max=    35
+  prefetched_storage_tries        : avg=     1.5  p50=     1  p95=     3  p99=     4  p999=    36  max=    36
+
+========================================================================================
+  stage_02_400tps   (9 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=   144.0  p50=   152  p95=   169  p99=   169  p999=   169  max=   169
+  build_duration_ms               : avg=    70.9ms  p50=    70ms  p95=    89ms  p99=    89ms  p999=    89ms  max=    89ms
+  prepare_duration_ms             : avg=     1.2ms  p50=     1ms  p95=     3ms  p99=     3ms  p999=     3ms  max=     3ms
+  trie_root_duration_ms           : avg=    22.9ms  p50=    21ms  p95=    38ms  p99=    38ms  p999=    38ms  max=    38ms
+  avg_tx_duration_micros (misleading!): avg=   498.3us  p50=   483us  p95=   575us  p99=   575us  p999=   575us  max=   575us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/9 (0.0%)
+  deadline_used_pct               : avg=    15.2%  p50=    15%  p95=    19%  p99=    19%  p999=    19%  max=    19%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=     3.5ms  p50=  0.86ms  p95=21.852ms  p99=21.852ms  p999=21.852ms  max=21.852ms
+  executor_finish                 : avg=     0.2ms  p50= 0.025ms  p95= 1.092ms  p99= 1.092ms  p999= 1.092ms  max= 1.092ms
+  merge_transitions               : avg=     0.0ms  p50= 0.005ms  p95= 0.124ms  p99= 0.124ms  p999= 0.124ms  max= 0.124ms
+  hashed_post_state               : avg=     0.0ms  p50= 0.002ms  p95= 0.253ms  p99= 0.253ms  p999= 0.253ms  max= 0.253ms
+  prefetcher_finish               : avg=     0.5ms  p50= 0.189ms  p95= 1.881ms  p99= 1.881ms  p999= 1.881ms  max= 1.881ms
+  to_triedb_state                 : avg=     0.0ms  p50= 0.001ms  p95= 0.063ms  p99= 0.063ms  p999= 0.063ms  max= 0.063ms
+  triedb_calc                     : avg=     2.9ms  p50= 0.634ms  p95=19.633ms  p99=19.633ms  p999=19.633ms  max=19.633ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    16.3ms  p50=    15ms  p95=    29ms  p99=    29ms  p999=    29ms  max=    29ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  intermediate_inner_ms           : avg=     9.0ms  p50=     7ms  p95=    19ms  p99=    19ms  p999=    19ms  max=    19ms
+  commit_ms                       : avg=     6.7ms  p50=     7ms  p95=     9ms  p99=     9ms  p999=     9ms  max=     9ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=   202.9  p50=    79  p95=   940  p99=   940  p999=   940  max=   940
+  resolve_difflayer_hit           : avg=   102.2  p50=    50  p95=   473  p99=   473  p999=   473  max=   473
+  resolve_fallthrough             : avg=   100.7  p50=    29  p95=   467  p99=   467  p999=   467  max=   467
+  difflayer_filter_pct            : avg=    43.9%  p50=    49%  p95=    66%  p99=    66%  p999=    66%  max=    66%
+  difflayer_chain_depth           : avg=   274.4  p50=   268  p95=   303  p99=   303  p999=   303  max=   303
+  difflayer_total_nodes           : avg=5697929.9  p50=5842680  p95=6168627  p99=6168627  p999=6168627  max=6168627
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 66.6%  (603 hits / 906 total)
+  cache_hits per block            : avg=    67.0  p50=     8  p95=   444  p99=   444  p999=   444  max=   444
+  cache_misses per block          : avg=    33.7  p50=    21  p95=   100  p99=   100  p999=   100  max=   100
+  acct_misses (account trie)      : avg=     2.9  p50=     0  p95=    24  p99=    24  p999=    24  max=    24
+  stor_misses (storage trie)      : avg=    30.8  p50=    19  p95=   100  p99=   100  p999=   100  max=   100
+
+[per-phase misses]
+  state_at_misses                 : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+  intermediate_misses             : avg=    33.7  p50=    21  p95=   100  p99=   100  p999=   100  max=   100
+  commit_misses                   : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=     6.4ms  p50=     4ms  p95=    17ms  p99=    17ms  p999=    17ms  max=    17ms
+  update_account_trie_ms (SERIAL) : avg=     0.3ms  p50=     0ms  p95=     2ms  p99=     2ms  p999=     2ms  max=     2ms
+  account_hash_ms                 : avg=     0.9ms  p50=     1ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  account_count                   : avg=   151.3  p50=   169  p95=   192  p99=   192  p999=   192  max=   192
+
+[commit_inner]
+  commit_state_objects_ms         : avg=     6.3ms  p50=     7ms  p95=     8ms  p99=     8ms  p999=     8ms  max=     8ms
+  storage_tries_count             : avg=    33.6  p50=    37  p95=    42  p99=    42  p999=    42  max=    42
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=24842316.4  p50=25390373  p95=28467943  p99=28467943  p999=28467943  max=28467943
+  node_insert_attempted           : avg=  3753.3  p50=  3863  p95=  4635  p99=  4635  p999=  4635  max=  4635
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     2.1us  p50=     2us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+  evm_transact_us                 : avg=   265.7us  p50=   268us  p95=   304us  p99=   304us  p999=   304us  max=   304us
+  state_clone_us                  : avg=     0.1us  p50=     0us  p95=     1us  p99=     1us  p999=     1us  max=     1us
+  prefetcher_hook_us              : avg=     3.3us  p50=     3us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     2.4us  p50=     2us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=    37.4ms  p50=    39ms  p95=    46ms  p99=    46ms  p999=    46ms  max=    46ms
+  total_prefetcher_hook_ms        : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  total_commit_ms                 : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  exec_duration_ms (loop total)   : avg=    45.6ms  p50=    48ms  p95=    50ms  p99=    50ms  p999=    50ms  max=    50ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=    90.4%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  needed_storage_accounts         : avg=     5.7  p50=     1  p95=    37  p99=    37  p999=    37  max=    37
+  prefetched_storage_tries        : avg=     5.0  p50=     1  p95=    37  p99=    37  p999=    37  max=    37
+
+========================================================================================
+  stage_03_800tps   (10 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=   305.7  p50=   322  p95=   353  p99=   353  p999=   353  max=   353
+  build_duration_ms               : avg=   123.0ms  p50=   130ms  p95=   134ms  p99=   134ms  p999=   134ms  max=   134ms
+  prepare_duration_ms             : avg=     0.4ms  p50=     0ms  p95=     2ms  p99=     2ms  p999=     2ms  max=     2ms
+  trie_root_duration_ms           : avg=    36.4ms  p50=    40ms  p95=    43ms  p99=    43ms  p999=    43ms  max=    43ms
+  avg_tx_duration_micros (misleading!): avg=   404.7us  p50=   411us  p95=   445us  p99=   445us  p999=   445us  max=   445us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/10 (0.0%)
+  deadline_used_pct               : avg=    26.8%  p50=    28%  p95=    29%  p99=    29%  p999=    29%  max=    29%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=     0.8ms  p50= 0.744ms  p95= 1.153ms  p99= 1.153ms  p999= 1.153ms  max= 1.153ms
+  executor_finish                 : avg=     0.0ms  p50= 0.026ms  p95= 0.032ms  p99= 0.032ms  p999= 0.032ms  max= 0.032ms
+  merge_transitions               : avg=     0.0ms  p50= 0.006ms  p95= 0.022ms  p99= 0.022ms  p999= 0.022ms  max= 0.022ms
+  hashed_post_state               : avg=     0.0ms  p50= 0.003ms  p95=  0.02ms  p99=  0.02ms  p999=  0.02ms  max=  0.02ms
+  prefetcher_finish               : avg=     0.2ms  p50= 0.174ms  p95= 0.409ms  p99= 0.409ms  p999= 0.409ms  max= 0.409ms
+  to_triedb_state                 : avg=     0.0ms  p50= 0.003ms  p95= 0.007ms  p99= 0.007ms  p999= 0.007ms  max= 0.007ms
+  triedb_calc                     : avg=     0.6ms  p50=  0.54ms  p95= 0.945ms  p99= 0.945ms  p999= 0.945ms  max= 0.945ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    28.7ms  p50=    31ms  p95=    34ms  p99=    34ms  p999=    34ms  max=    34ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  intermediate_inner_ms           : avg=    14.9ms  p50=    16ms  p95=    20ms  p99=    20ms  p999=    20ms  max=    20ms
+  commit_ms                       : avg=    12.8ms  p50=    13ms  p95=    15ms  p99=    15ms  p999=    15ms  max=    15ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=   142.4  p50=   170  p95=   315  p99=   315  p999=   315  max=   315
+  resolve_difflayer_hit           : avg=    63.0  p50=    65  p95=   144  p99=   144  p999=   144  max=   144
+  resolve_fallthrough             : avg=    79.4  p50=    95  p95=   171  p99=   171  p999=   171  max=   171
+  difflayer_filter_pct            : avg=    43.2%  p50=    40%  p95=    65%  p99=    65%  p999=    65%  max=    65%
+  difflayer_chain_depth           : avg=   272.4  p50=   269  p95=   301  p99=   301  p999=   301  max=   301
+  difflayer_total_nodes           : avg=5336292.0  p50=5731749  p95=6140554  p99=6140554  p999=6140554  max=6140554
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 25.1%  (199 hits / 794 total)
+  cache_hits per block            : avg=    19.9  p50=    21  p95=    54  p99=    54  p999=    54  max=    54
+  cache_misses per block          : avg=    59.5  p50=    63  p95=   117  p99=   117  p999=   117  max=   117
+  acct_misses (account trie)      : avg=     2.9  p50=     0  p95=    19  p99=    19  p999=    19  max=    19
+  stor_misses (storage trie)      : avg=    56.6  p50=    63  p95=    98  p99=    98  p999=    98  max=    98
+
+[per-phase misses]
+  state_at_misses                 : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+  intermediate_misses             : avg=    59.5  p50=    63  p95=   117  p99=   117  p999=   117  max=   117
+  commit_misses                   : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=     9.9ms  p50=    10ms  p95=    15ms  p99=    15ms  p999=    15ms  max=    15ms
+  update_account_trie_ms (SERIAL) : avg=     1.6ms  p50=     2ms  p95=     4ms  p99=     4ms  p999=     4ms  max=     4ms
+  account_hash_ms                 : avg=     2.2ms  p50=     2ms  p95=     4ms  p99=     4ms  p999=     4ms  max=     4ms
+  account_count                   : avg=   296.3  p50=   312  p95=   337  p99=   337  p999=   337  max=   337
+
+[commit_inner]
+  commit_state_objects_ms         : avg=    12.2ms  p50=    13ms  p95=    14ms  p99=    14ms  p999=    14ms  max=    14ms
+  storage_tries_count             : avg=    37.0  p50=    37  p95=    37  p99=    37  p999=    37  max=    37
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=25120137.8  p50=25391909  p95=28469441  p99=28469441  p999=28469441  max=28469441
+  node_insert_attempted           : avg=  6561.2  p50=  6714  p95=  7355  p99=  7355  p999=  7355  max=  7355
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  evm_transact_us                 : avg=   268.5us  p50=   268us  p95=   309us  p99=   309us  p999=   309us  max=   309us
+  state_clone_us                  : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  prefetcher_hook_us              : avg=     3.4us  p50=     3us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     2.5us  p50=     3us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=    81.6ms  p50=    86ms  p95=    86ms  p99=    86ms  p999=    86ms  max=    86ms
+  total_prefetcher_hook_ms        : avg=     0.9ms  p50=     1ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  total_commit_ms                 : avg=     0.3ms  p50=     0ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  exec_duration_ms (loop total)   : avg=    85.1ms  p50=    89ms  p95=    90ms  p99=    90ms  p999=    90ms  max=    90ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  needed_storage_accounts         : avg=     1.0  p50=     1  p95=     1  p99=     1  p999=     1  max=     1
+  prefetched_storage_tries        : avg=     1.0  p50=     1  p95=     1  p99=     1  p999=     1  max=     1
+
+========================================================================================
+  stage_04_1200tps   (17 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=   411.2  p50=   394  p95=   515  p99=   515  p999=   515  max=   515
+  build_duration_ms               : avg=   133.2ms  p50=   131ms  p95=   179ms  p99=   179ms  p999=   179ms  max=   179ms
+  prepare_duration_ms             : avg=     0.1ms  p50=     0ms  p95=     2ms  p99=     2ms  p999=     2ms  max=     2ms
+  trie_root_duration_ms           : avg=    42.4ms  p50=    42ms  p95=    56ms  p99=    56ms  p999=    56ms  max=    56ms
+  avg_tx_duration_micros (misleading!): avg=   325.9us  p50=   331us  p95=   368us  p99=   368us  p999=   368us  max=   368us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/17 (0.0%)
+  deadline_used_pct               : avg=    29.1%  p50=    29%  p95=    39%  p99=    39%  p999=    39%  max=    39%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=     3.2ms  p50= 0.775ms  p95=42.921ms  p99=42.921ms  p999=42.921ms  max=42.921ms
+  executor_finish                 : avg=     0.0ms  p50= 0.025ms  p95= 0.347ms  p99= 0.347ms  p999= 0.347ms  max= 0.347ms
+  merge_transitions               : avg=     0.0ms  p50= 0.005ms  p95= 0.316ms  p99= 0.316ms  p999= 0.316ms  max= 0.316ms
+  hashed_post_state               : avg=     0.0ms  p50= 0.003ms  p95= 0.295ms  p99= 0.295ms  p999= 0.295ms  max= 0.295ms
+  prefetcher_finish               : avg=     0.4ms  p50= 0.199ms  p95= 4.018ms  p99= 4.018ms  p999= 4.018ms  max= 4.018ms
+  to_triedb_state                 : avg=     0.0ms  p50= 0.002ms  p95= 0.187ms  p99= 0.187ms  p999= 0.187ms  max= 0.187ms
+  triedb_calc                     : avg=     2.8ms  p50= 0.508ms  p95=38.391ms  p99=38.391ms  p999=38.391ms  max=38.391ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    33.4ms  p50=    33ms  p95=    49ms  p99=    49ms  p999=    49ms  max=    49ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  intermediate_inner_ms           : avg=    17.4ms  p50=    17ms  p95=    29ms  p99=    29ms  p999=    29ms  max=    29ms
+  commit_ms                       : avg=    15.0ms  p50=    15ms  p95=    19ms  p99=    19ms  p999=    19ms  max=    19ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=   403.7  p50=   238  p95=  1754  p99=  1754  p999=  1754  max=  1754
+  resolve_difflayer_hit           : avg=   158.0  p50=    99  p95=   489  p99=   489  p999=   489  max=   489
+  resolve_fallthrough             : avg=   245.7  p50=   126  p95=  1307  p99=  1307  p999=  1307  max=  1307
+  difflayer_filter_pct            : avg=    43.0%  p50=    44%  p95=    59%  p99=    59%  p999=    59%  max=    59%
+  difflayer_chain_depth           : avg=   266.5  p50=   262  p95=   307  p99=   307  p999=   307  max=   307
+  difflayer_total_nodes           : avg=4192619.3  p50=5242089  p95=6255930  p99=6255930  p999=6255930  max=6255930
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 47.3%  (1976 hits / 4177 total)
+  cache_hits per block            : avg=   116.2  p50=    37  p95=   761  p99=   761  p999=   761  max=   761
+  cache_misses per block          : avg=   129.5  p50=    89  p95=   546  p99=   546  p999=   546  max=   546
+  acct_misses (account trie)      : avg=    25.4  p50=    10  p95=   146  p99=   146  p999=   146  max=   146
+  stor_misses (storage trie)      : avg=   104.1  p50=    76  p95=   400  p99=   400  p999=   400  max=   400
+
+[per-phase misses]
+  state_at_misses                 : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+  intermediate_misses             : avg=   129.5  p50=    89  p95=   546  p99=   546  p999=   546  max=   546
+  commit_misses                   : avg=     0.0  p50=     0  p95=     0  p99=     0  p999=     0  max=     0
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=    10.6ms  p50=    11ms  p95=    16ms  p99=    16ms  p999=    16ms  max=    16ms
+  update_account_trie_ms (SERIAL) : avg=     3.5ms  p50=     3ms  p95=    10ms  p99=    10ms  p999=    10ms  max=    10ms
+  account_hash_ms                 : avg=     2.5ms  p50=     3ms  p95=     3ms  p99=     3ms  p999=     3ms  max=     3ms
+  account_count                   : avg=   363.6  p50=   371  p95=   492  p99=   492  p999=   492  max=   492
+
+[commit_inner]
+  commit_state_objects_ms         : avg=    14.1ms  p50=    14ms  p95=    18ms  p99=    18ms  p999=    18ms  max=    18ms
+  storage_tries_count             : avg=    35.2  p50=    37  p95=    37  p99=    37  p999=    37  max=    37
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=25115597.1  p50=25404127  p95=28471115  p99=28471115  p999=28471115  max=28471115
+  node_insert_attempted           : avg=  8366.0  p50=  8061  p95= 10189  p99= 10189  p999= 10189  max= 10189
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  evm_transact_us                 : avg=   210.6us  p50=   219us  p95=   253us  p99=   253us  p999=   253us  max=   253us
+  state_clone_us                  : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  prefetcher_hook_us              : avg=     2.8us  p50=     3us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     2.2us  p50=     2us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=    85.6ms  p50=    86ms  p95=   126ms  p99=   126ms  p999=   126ms  max=   126ms
+  total_prefetcher_hook_ms        : avg=     1.0ms  p50=     1ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  total_commit_ms                 : avg=     0.7ms  p50=     1ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  exec_duration_ms (loop total)   : avg=    89.9ms  p50=    90ms  p95=   132ms  p99=   132ms  p999=   132ms  max=   132ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=   100.1%  p50=   100%  p95=   102%  p99=   102%  p999=   102%  max=   102%
+  needed_storage_accounts         : avg=     3.1  p50=     1  p95=    37  p99=    37  p999=    37  max=    37
+  prefetched_storage_tries        : avg=     3.2  p50=     1  p95=    38  p99=    38  p999=    38  max=    38
+
+========================================================================================
+  stage_05_1500tps   (8 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=   657.5  p50=   666  p95=   699  p99=   699  p999=   699  max=   699
+  build_duration_ms               : avg=   228.8ms  p50=   212ms  p95=   404ms  p99=   404ms  p999=   404ms  max=   404ms
+  prepare_duration_ms             : avg=     0.1ms  p50=     0ms  p95=     1ms  p99=     1ms  p999=     1ms  max=     1ms
+  trie_root_duration_ms           : avg=    65.4ms  p50=    65ms  p95=    82ms  p99=    82ms  p999=    82ms  max=    82ms
+  avg_tx_duration_micros (misleading!): avg=   348.6us  p50=   316us  p95=   616us  p99=   616us  p999=   616us  max=   616us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/8 (0.0%)
+  deadline_used_pct               : avg=    50.2%  p50=    47%  p95=    89%  p99=    89%  p999=    89%  max=    89%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=    52.6ms  p50=59.689ms  p95=70.744ms  p99=70.744ms  p999=70.744ms  max=70.744ms
+  executor_finish                 : avg=     0.7ms  p50= 0.441ms  p95= 2.796ms  p99= 2.796ms  p999= 2.796ms  max= 2.796ms
+  merge_transitions               : avg=     0.4ms  p50= 0.391ms  p95=  0.55ms  p99=  0.55ms  p999=  0.55ms  max=  0.55ms
+  hashed_post_state               : avg=     0.3ms  p50= 0.211ms  p95= 0.929ms  p99= 0.929ms  p999= 0.929ms  max= 0.929ms
+  prefetcher_finish               : avg=     6.5ms  p50= 5.968ms  p95=14.742ms  p99=14.742ms  p999=14.742ms  max=14.742ms
+  to_triedb_state                 : avg=     0.2ms  p50= 0.225ms  p95= 0.292ms  p99= 0.292ms  p999= 0.292ms  max= 0.292ms
+  triedb_calc                     : avg=    45.6ms  p50=49.486ms  p95=64.206ms  p99=64.206ms  p999=64.206ms  max=64.206ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    27.4ms  p50=     6ms  p95=    76ms  p99=    76ms  p999=    76ms  max=    76ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+  intermediate_inner_ms           : avg=    17.2ms  p50=     0ms  p95=    51ms  p99=    51ms  p999=    51ms  max=    51ms
+  commit_ms                       : avg=     9.5ms  p50=     6ms  p95=    25ms  p99=    25ms  p999=    25ms  max=    25ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=  1655.6  p50=    93  p95=  6358  p99=  6358  p999=  6358  max=  6358
+  resolve_difflayer_hit           : avg=   639.8  p50=    34  p95=  2389  p99=  2389  p999=  2389  max=  2389
+  resolve_fallthrough             : avg=  1015.9  p50=    59  p95=  3983  p99=  3983  p999=  3983  max=  3983
+  difflayer_filter_pct            : avg=    40.0%  p50=    37%  p95=    66%  p99=    66%  p999=    66%  max=    66%
+  difflayer_chain_depth           : avg=   269.2  p50=   262  p95=   294  p99=   294  p999=   294  max=   294
+  difflayer_total_nodes           : avg=3944686.0  p50=4160076  p95=5992598  p99=5992598  p999=5992598  max=5992598
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 94.4%  (7670 hits / 8125 total)
+  cache_hits per block            : avg=   958.8  p50=    11  p95=  3983  p99=  3983  p999=  3983  max=  3983
+  cache_misses per block          : avg=    56.9  p50=    15  p95=   358  p99=   358  p999=   358  max=   358
+  acct_misses (account trie)      : avg=    11.1  p50=     2  p95=    68  p99=    68  p999=    68  max=    68
+  stor_misses (storage trie)      : avg=    46.6  p50=    14  p95=   290  p99=   290  p999=   290  max=   290
+
+[per-phase misses]
+  state_at_misses                 : avg=     0.2  p50=     0  p95=     2  p99=     2  p999=     2  max=     2
+  intermediate_misses             : avg=    49.4  p50=     8  p95=   358  p99=   358  p999=   358  max=   358
+  commit_misses                   : avg=     7.2  p50=     4  p95=    40  p99=    40  p999=    40  max=    40
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=     9.0ms  p50=     0ms  p95=    26ms  p99=    26ms  p999=    26ms  max=    26ms
+  update_account_trie_ms (SERIAL) : avg=     6.1ms  p50=     0ms  p95=    21ms  p99=    21ms  p999=    21ms  max=    21ms
+  account_hash_ms                 : avg=     1.8ms  p50=     0ms  p95=     5ms  p99=     5ms  p999=     5ms  max=     5ms
+  account_count                   : avg=   212.9  p50=     1  p95=   585  p99=   585  p999=   585  max=   585
+
+[commit_inner]
+  commit_state_objects_ms         : avg=     8.9ms  p50=     6ms  p95=    23ms  p99=    23ms  p999=    23ms  max=    23ms
+  storage_tries_count             : avg=    14.5  p50=     1  p95=    37  p99=    37  p999=    37  max=    37
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=25014617.4  p50=23753983  p95=28457473  p99=28457473  p999=28457473  max=28457473
+  node_insert_attempted           : avg= 11178.4  p50= 12436  p95= 13220  p99= 13220  p999= 13220  max= 13220
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  evm_transact_us                 : avg=   235.0us  p50=   215us  p95=   477us  p99=   477us  p999=   477us  max=   477us
+  state_clone_us                  : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  prefetcher_hook_us              : avg=     2.8us  p50=     3us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     2.2us  p50=     2us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=   153.9ms  p50=   141ms  p95=   312ms  p99=   312ms  p999=   312ms  max=   312ms
+  total_prefetcher_hook_ms        : avg=     1.6ms  p50=     2ms  p95=     2ms  p99=     2ms  p999=     2ms  max=     2ms
+  total_commit_ms                 : avg=     1.2ms  p50=     1ms  p95=     2ms  p99=     2ms  p999=     2ms  max=     2ms
+  exec_duration_ms (loop total)   : avg=   162.0ms  p50=   149ms  p95=   320ms  p99=   320ms  p999=   320ms  max=   320ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=    99.6%  p50=   100%  p95=   105%  p99=   105%  p999=   105%  max=   105%
+  needed_storage_accounts         : avg=    33.0  p50=    38  p95=    38  p99=    38  p999=    38  max=    38
+  prefetched_storage_tries        : avg=    33.0  p50=    37  p95=    39  p99=    39  p999=    39  max=    39
+
+========================================================================================
+  stage_06_2000tps   (60 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=   885.5  p50=   912  p95=   989  p99=  1000  p999=  1000  max=  1000
+  build_duration_ms               : avg=   285.6ms  p50=   284ms  p95=   388ms  p99=   400ms  p999=   400ms  max=   400ms
+  prepare_duration_ms             : avg=     0.1ms  p50=     0ms  p95=     0ms  p99=     3ms  p999=     3ms  max=     3ms
+  trie_root_duration_ms           : avg=    83.8ms  p50=    80ms  p95=   119ms  p99=   155ms  p999=   155ms  max=   155ms
+  avg_tx_duration_micros (misleading!): avg=   322.5us  p50=   317us  p95=   425us  p99=   460us  p999=   460us  max=   460us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 0/60 (0.0%)
+  deadline_used_pct               : avg=    63.0%  p50=    63%  p95=    86%  p99=    88%  p999=    88%  max=    88%
+  overrun_ms (how far over 450ms) : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     0ms  p999=     0ms  max=     0ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=    66.2ms  p50=70.977ms  p95=113.713ms  p99=150.271ms  p999=150.271ms  max=150.271ms
+  executor_finish                 : avg=     0.3ms  p50= 0.276ms  p95= 0.546ms  p99= 0.608ms  p999= 0.608ms  max= 0.608ms
+  merge_transitions               : avg=     0.4ms  p50= 0.458ms  p95= 0.792ms  p99= 0.833ms  p999= 0.833ms  max= 0.833ms
+  hashed_post_state               : avg=     0.4ms  p50= 0.254ms  p95= 1.714ms  p99= 6.994ms  p999= 6.994ms  max= 6.994ms
+  prefetcher_finish               : avg=     5.9ms  p50= 6.614ms  p95=   9.9ms  p99=12.458ms  p999=12.458ms  max=12.458ms
+  to_triedb_state                 : avg=     0.2ms  p50= 0.257ms  p95= 0.364ms  p99= 0.397ms  p999= 0.397ms  max= 0.397ms
+  triedb_calc                     : avg=    59.6ms  p50= 64.04ms  p95=99.201ms  p99=140.926ms  p999=140.926ms  max=140.926ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=    23.6ms  p50=     0ms  p95=   110ms  p99=   163ms  p999=   163ms  max=   163ms
+  state_at_ms                     : avg=     0.0ms  p50=     0ms  p95=     0ms  p99=     1ms  p999=     1ms  max=     1ms
+  intermediate_inner_ms           : avg=    14.9ms  p50=     0ms  p95=    75ms  p99=   121ms  p999=   121ms  max=   121ms
+  commit_ms                       : avg=     8.4ms  p50=     0ms  p95=    36ms  p99=    50ms  p999=    50ms  max=    50ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=   969.7  p50=    33  p95=  8711  p99= 19407  p999= 19407  max= 19407
+  resolve_difflayer_hit           : avg=   366.4  p50=    10  p95=  2992  p99=  7386  p999=  7386  max=  7386
+  resolve_fallthrough             : avg=   603.3  p50=    23  p95=  5719  p99= 12021  p999= 12021  max= 12021
+  difflayer_filter_pct            : avg=    30.4%  p50=    32%  p95=    62%  p99=    84%  p999=    84%  max=    84%
+  difflayer_chain_depth           : avg=   263.4  p50=   258  p95=   300  p99=   315  p999=   315  max=   315
+  difflayer_total_nodes           : avg=3793811.0  p50=3552511  p95=6122156  p99=6413406  p999=6413406  max=6413406
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 84.3%  (30511 hits / 36207 total)
+  cache_hits per block            : avg=   508.5  p50=     7  p95=  5719  p99= 10300  p999= 10300  max= 10300
+  cache_misses per block          : avg=    94.9  p50=    13  p95=   637  p99=  1720  p999=  1720  max=  1720
+  acct_misses (account trie)      : avg=    20.0  p50=     0  p95=   170  p99=   365  p999=   365  max=   365
+  stor_misses (storage trie)      : avg=    75.2  p50=     9  p95=   467  p99=  1357  p999=  1357  max=  1357
+
+[per-phase misses]
+  state_at_misses                 : avg=     1.2  p50=     0  p95=     6  p99=    27  p999=    27  max=    27
+  intermediate_misses             : avg=    83.4  p50=     7  p95=   637  p99=  1648  p999=  1648  max=  1648
+  commit_misses                   : avg=    10.3  p50=     0  p95=    20  p99=   429  p999=   429  max=   429
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=     9.9ms  p50=     0ms  p95=    39ms  p99=    82ms  p999=    82ms  max=    82ms
+  update_account_trie_ms (SERIAL) : avg=     3.6ms  p50=     0ms  p95=    29ms  p99=    46ms  p999=    46ms  max=    46ms
+  account_hash_ms                 : avg=     2.1ms  p50=     0ms  p95=     8ms  p99=     9ms  p999=     9ms  max=     9ms
+  account_count                   : avg=   297.9  p50=     1  p95=  1057  p99=  1257  p999=  1257  max=  1257
+
+[commit_inner]
+  commit_state_objects_ms         : avg=     7.8ms  p50=     0ms  p95=    34ms  p99=    48ms  p999=    48ms  max=    48ms
+  storage_tries_count             : avg=    10.6  p50=     1  p95=    37  p99=    37  p999=    37  max=    37
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=23749731.5  p50=22871417  p95=28462914  p99=28463659  p999=28463659  max=28463659
+  node_insert_attempted           : avg= 15941.7  p50= 16606  p95= 18193  p99= 18671  p999= 18671  max= 18671
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  evm_transact_us                 : avg=   216.1us  p50=   213us  p95=   331us  p99=   358us  p999=   358us  max=   358us
+  state_clone_us                  : avg=     0.0us  p50=     0us  p95=     0us  p99=     2us  p999=     2us  max=     2us
+  prefetcher_hook_us              : avg=     2.8us  p50=     3us  p95=     4us  p99=     4us  p999=     4us  max=     4us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     0us  max=     0us
+  commit_us                       : avg=     2.1us  p50=     2us  p95=     3us  p99=     3us  p999=     3us  max=     3us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=   191.2ms  p50=   184ms  p95=   301ms  p99=   312ms  p999=   312ms  max=   312ms
+  total_prefetcher_hook_ms        : avg=     2.3ms  p50=     2ms  p95=     3ms  p99=     4ms  p999=     4ms  max=     4ms
+  total_commit_ms                 : avg=     1.9ms  p50=     2ms  p95=     2ms  p99=     3ms  p999=     3ms  max=     3ms
+  exec_duration_ms (loop total)   : avg=   200.8ms  p50=   193ms  p95=   312ms  p99=   323ms  p999=   323ms  max=   323ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=    99.7%  p50=   100%  p95=   102%  p99=   102%  p999=   102%  max=   102%
+  needed_storage_accounts         : avg=    32.9  p50=    37  p95=    38  p99=    38  p999=    38  max=    38
+  prefetched_storage_tries        : avg=    32.9  p50=    37  p95=    38  p99=    39  p999=    39  max=    39
+
+========================================================================================
+  stage_07_>2000tps   (729 blocks, caller=miner)
+========================================================================================
+
+[workload]
+  tx_count                        : avg=  1540.9  p50=  1592  p95=  1825  p99=  1838  p999=  1852  max=  1852
+  build_duration_ms               : avg=   475.1ms  p50=   444ms  p95=   644ms  p99=   701ms  p999=   971ms  max=   971ms
+  prepare_duration_ms             : avg=     0.4ms  p50=     0ms  p95=     2ms  p99=     3ms  p999=     5ms  max=     5ms
+  trie_root_duration_ms           : avg=   167.5ms  p50=   148ms  p95=   303ms  p99=   355ms  p999=   491ms  max=   491ms
+  avg_tx_duration_micros (misleading!): avg=   310.0us  p50=   313us  p95=   365us  p99=   392us  p999=   542us  max=   542us
+
+[build deadline vs 450ms slot]
+  blocks over 450ms               : 348/729 (47.7%)
+  deadline_used_pct               : avg=   105.1%  p50=    98%  p95=   143%  p99=   155%  p999=   215%  max=   215%
+  overrun_ms (how far over 450ms) : avg=    50.7ms  p50=     0ms  p95=   194ms  p99=   251ms  p999=   521ms  max=   521ms
+
+[state root breakdown (ms)]
+  state_root_total                : avg=   116.2ms  p50=136.553ms  p95=294.275ms  p99=345.46ms  p999=482.503ms  max=482.503ms
+  executor_finish                 : avg=     0.3ms  p50= 0.406ms  p95= 0.592ms  p99=  1.44ms  p999= 6.383ms  max= 6.383ms
+  merge_transitions               : avg=     0.7ms  p50= 0.811ms  p95= 1.535ms  p99= 1.916ms  p999= 3.672ms  max= 3.672ms
+  hashed_post_state               : avg=     1.0ms  p50= 0.332ms  p95= 3.233ms  p99=18.428ms  p999=33.858ms  max=33.858ms
+  prefetcher_finish               : avg=     7.4ms  p50= 8.813ms  p95=17.949ms  p99= 25.85ms  p999=60.805ms  max=60.805ms
+  to_triedb_state                 : avg=     0.3ms  p50= 0.416ms  p95= 0.586ms  p99= 0.679ms  p999= 3.095ms  max= 3.095ms
+  triedb_calc                     : avg=   107.5ms  p50=122.305ms  p95=274.922ms  p99=332.793ms  p999=456.827ms  max=456.827ms
+
+[triedb intermediate_and_commit]
+  total_ms                        : avg=   140.3ms  p50=   112ms  p95=   293ms  p99=   407ms  p999=   596ms  max=   596ms
+  state_at_ms                     : avg=     0.5ms  p50=     1ms  p95=     1ms  p99=     2ms  p999=    11ms  max=    11ms
+  intermediate_inner_ms           : avg=    89.8ms  p50=    62ms  p95=   233ms  p99=   343ms  p999=   536ms  max=   536ms
+  commit_ms                       : avg=    49.0ms  p50=    46ms  p95=    93ms  p99=   110ms  p999=   184ms  max=   184ms
+
+[DiffLayer filter]
+  resolve_total                   : avg=  8806.6  p50=  6158  p95= 30037  p99= 35238  p999= 39269  max= 39269
+  resolve_difflayer_hit           : avg=  3111.7  p50=  1998  p95= 10957  p99= 12867  p999= 15612  max= 15612
+  resolve_fallthrough             : avg=  5694.9  p50=  3693  p95= 18641  p99= 22577  p999= 26099  max= 26099
+  difflayer_filter_pct            : avg=    31.0%  p50=    33%  p95=    43%  p99=    49%  p999=    75%  max=    75%
+  difflayer_chain_depth           : avg=   265.3  p50=   260  p95=   297  p99=   309  p999=   316  max=   316
+  difflayer_total_nodes           : avg=4076097.0  p50=4715712  p95=6060635  p99=6287321  p999=6431095  max=6431095
+
+[moka cache (below DiffLayer)]
+  overall hit rate                : 76.1%  (3157911 hits / 4151693 total)
+  cache_hits per block            : avg=  4331.8  p50=  2544  p95= 13421  p99= 17633  p999= 23116  max= 23116
+  cache_misses per block          : avg=  1363.2  p50=   227  p95=  6154  p99=  7886  p999= 10546  max= 10546
+  acct_misses (account trie)      : avg=   325.5  p50=    38  p95=  1440  p99=  1964  p999=  2568  max=  2568
+  stor_misses (storage trie)      : avg=  1038.0  p50=   182  p95=  4606  p99=  6395  p999=  7978  max=  7978
+
+[per-phase misses]
+  state_at_misses                 : avg=     5.1  p50=     0  p95=    28  p99=    40  p999=    62  max=    62
+  intermediate_misses             : avg=  1237.5  p50=   226  p95=  5555  p99=  7832  p999= 10546  max= 10546
+  commit_misses                   : avg=   120.6  p50=     0  p95=   819  p99=  1468  p999=  2073  max=  2073
+
+[intermediate_inner — update_account_trie is serial]
+  update_state_objects_ms         : avg=    51.7ms  p50=    37ms  p95=   134ms  p99=   204ms  p999=   316ms  max=   316ms
+  update_account_trie_ms (SERIAL) : avg=    23.9ms  p50=    14ms  p95=    73ms  p99=   137ms  p999=   205ms  max=   205ms
+  account_hash_ms                 : avg=     9.1ms  p50=     8ms  p95=    14ms  p99=    49ms  p999=   168ms  max=   168ms
+  account_count                   : avg=  1066.3  p50=  1116  p95=  1570  p99=  1602  p999=  1615  max=  1615
+
+[commit_inner]
+  commit_state_objects_ms         : avg=    46.1ms  p50=    43ms  p95=    90ms  p99=   106ms  p999=   182ms  max=   182ms
+  storage_tries_count             : avg=    35.6  p50=    37  p95=    38  p99=    38  p999=    38  max=    38
+
+[moka admission]
+  node_admit_pct                  : avg=   100.0%  p50=   100%  p95=   100%  p99=   100%  p999=   100%  max=   100%
+  trie_cache_entries              : avg=24358626.2  p50=24221248  p95=28464283  p99=28471021  p999=28471116  max=28471116
+  node_insert_attempted           : avg= 21507.3  p50= 22356  p95= 28633  p99= 31081  p999= 32104  max= 32104
+
+[per-tx exec breakdown (microseconds)]
+  pre_exec_us                     : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     7us  max=     7us
+  evm_transact_us                 : avg=   192.1us  p50=   194us  p95=   252us  p99=   273us  p999=   289us  max=   289us
+  state_clone_us                  : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     3us  max=     3us
+  prefetcher_hook_us              : avg=     2.4us  p50=     2us  p95=     3us  p99=     4us  p999=     6us  max=     6us
+  receipt_build_us                : avg=     0.0us  p50=     0us  p95=     0us  p99=     0us  p999=     2us  max=     2us
+  commit_us                       : avg=     2.2us  p50=     2us  p95=     3us  p99=     3us  p999=     7us  max=     7us
+
+[per-tx exec totals per block (ms)]
+  total_evm_transact_ms           : avg=   288.8ms  p50=   298ms  p95=   371ms  p99=   443ms  p999=   488ms  max=   488ms
+  total_prefetcher_hook_ms        : avg=     3.9ms  p50=     4ms  p95=     5ms  p99=     6ms  p999=     9ms  max=     9ms
+  total_commit_ms                 : avg=     3.6ms  p50=     4ms  p95=     5ms  p99=     6ms  p999=    14ms  max=    14ms
+  exec_duration_ms (loop total)   : avg=   306.1ms  p50=   314ms  p95=   390ms  p99=   468ms  p999=   515ms  max=   515ms
+
+[prefetch storage coverage]
+  coverage_pct                    : avg=    97.6%  p50=    97%  p95=   102%  p99=   102%  p999=   150%  max=   150%
+  needed_storage_accounts         : avg=    25.6  p50=    38  p95=    38  p99=    38  p999=    38  max=    38
+  prefetched_storage_tries        : avg=    24.9  p50=    37  p95=    39  p99=    39  p999=    39  max=    39
+
+========================================================================================
+  persistence thread   (P-1: back-pressure signal)
+========================================================================================
+
+  save_blocks_us (per event)      : avg=851851.4us  p50=16549.992us  p95=5028206.891us  p99=8823867.726us  p999=15468023.417us  max=15468023.417us
+
+[persistence lag at completion (unpersisted at that moment)]
+  lag_blocks                      : avg=   257.5  p50=   256  p95=   267  p99=   276  p999=   287  max=   287
+  save_blocks batch size          : avg=     2.4  p50=     1  p95=    11  p99=    21  p999=    31  max=    31
+
