@@ -265,16 +265,62 @@ stage_07_>2000tps   (648 blocks, caller=miner)
   overall hit rate : 54.8% (stage_07 内部 bucket; 总体 75.6%)
 ```
 
-### 3.2 "超预算比例反而上升"的解释
+### 3.2 "超预算比例反而上升"的真实解释
 
-注意 `blocks over 450ms` 从 **51.8% 变成 62.2%**，看起来退化。但 p999 build 从 **1538ms 降到 767ms**——尾巴腰斩了。这不是退化，是 **pool + prewarm 释放出的 CPU 被用来在每块塞更多 tx**：
+注意 `blocks over 450ms` 从 **51.8% 变成 62.2%**，看起来退化。但 p999 build 从 **1538ms 降到 767ms**——尾巴腰斩了。这里有两件互相拉扯的事情发生。
 
-```
-上一轮 stage_07:  avg 1567 tx/块 × 499ms build = 3138 TPS 处理率
-本 轮 stage_07:  avg 1557 tx/块 × 523ms build = 2977 TPS 处理率
-```
+#### 先对齐数据
 
-tx/块几乎一样但 build 变长？是的，因为 **tx 密度相同的情况下现在能真正把这些 tx 执行完**——上一轮的 1567 tx 是压测脚本发的，不代表全部入块；本轮更多 tx 真正落地。用户端观察到的 2700 TPS 实测正是这种"多块、每块更满"的结果。
+两份 report 的 stage_07（tx/块 avg 都在 ~1560）build_duration 分布：
+
+| stage_07 | 2500 报告 | 2700 报告 |
+|---|---|---|
+| tx_count avg | 1567 | 1557 |
+| tx_count p50 | 1635 | 1611 |
+| build_duration avg | 499ms | 523ms |
+| **build_duration p50** | **455ms** | **536ms**（涨了 80ms）|
+| build_duration p99 | 1324ms | **724ms**（降 600ms）|
+| build_duration p999 | 1538ms | **767ms**（降 770ms）|
+| per-tx `evm_transact` avg | **183us** | **222us**（涨 20%）|
+
+tx/块是**实际打包进块的数量**（`payload.rs:812` 的 `transactions.len()`），**两轮几乎一样**。
+
+#### 真正发生了什么
+
+两件事同时发生：
+
+**1. 消除了灾难性 tail（好）**
+  - 2500 报告：p99 = 1324ms，p999 = 1538ms。长尾是 PrewarmContext（9% CPU）+ PendingPool sort（21.7% CPU）在偶发高冲突时把某些块拖到 1-2 秒
+  - 2700 报告：p99 = 724ms，p999 = 767ms。长尾完全消失
+
+**2. median 反而涨了 80ms（小坏）**
+  - per-tx `evm_transact` 从 183us → 222us（+20%）
+  - 原因：`--engine.disable-prewarming` 省掉的不只是"重复 EVM 计算"，还**副作用地**在 warm state provider cache。miner 自己的 EVM 执行原本能蹭到这份热 cache，现在蹭不到，per-tx 变慢
+  - 1557 tx × (+40us/tx) = 62ms 的 per-块增量，和 median build 涨的 80ms 对得上
+
+#### 净效应
+
+超预算比例 51.8% → 62.2% 上升，是因为 **median 从 455ms（刚好踩 450 线）平移到 536ms（稳定超 86ms）**。但这是好事，因为：
+
+**链节奏视角**（sustained TPS 的真实决定因素）：
+
+| | 2500 报告 | 2700 报告 |
+|---|---|---|
+| 是否有 1-2 秒灾难块 | 有（p999 = 1.5s）| 无（p999 = 0.77s）|
+| 实际出块速率 | ~1.5 块/sec（偶发长块阻断链）| ~1.91 块/sec（稳定 500-700ms）|
+| 实测 sustained TPS | ~2350 TPS | **~2700 TPS** ✓ |
+
+**不是"每块塞更多 tx"让 TPS 上升，而是"链节奏稳定"让 TPS 上升**。偶发的 1.5s 块在上一轮里阻断整个链，一块卡壳三四个 slot；消除它之后每块稍慢但链不卡，总吞吐反而高。
+
+#### 要不要把 median 也拉回去
+
+per-tx `evm_transact` 的 +20% 来自失去 prewarm cache warming 的副作用。理论上有三条路：
+
+1. **接受这个代价**（当前做法）：换来 9% CPU 可用 + 消除 tail，净赚
+2. **只关 prewarm 的 EVM 执行，保留它的 state cache 预热**：需要改 reth-engine-tree 里 `PrewarmContext` 让它只做 state read 不做 EVM call
+3. **在 BSC miner 侧补上等价的 state cache 预热**：在 build_payload 前对 pending 的 top-N tx 预读 sender/to 的账户状态，相当于自己做一份 prewarm 但不跑 EVM
+
+路线图 Phase 0.5（启动预热骨干）部分能对冲这个副作用，但主要针对 moka cache 里的 trie node，不是 state provider cache。如果压测显示 +20% per-tx 真的把天花板压住了，可以再考虑路线 2 或 3。
 
 ---
 
