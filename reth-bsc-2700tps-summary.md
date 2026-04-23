@@ -206,7 +206,9 @@ INFO TrieDB/RocksDB config (override via RETHBSC_ROCKSDB_* env vars)
   trie_cache_entries : avg=24M  max=26M  ← cap 扩大到 40M 后没满
 ```
 
-hit rate 从 15-25% 跳到 54.8%，而且 cache 没占满（avg 24M / cap 40M）——**说明这一项还可以继续加大**。
+hit rate 从 15-25% 跳到 54.8%。cache 在 stage_07 下稳定在 **24-26M / cap 40M**（见 §4.3.4 详细数据），**远未占满**。
+
+**重要纠正**：直觉"没满就继续加大 cap"在这里是错的——容量没满却 hit rate 只有 54.8%，说明 entries 不是因为**容量淘汰**被踢出，而是被 **TinyLFU 频次淘汰** 或 **`commit_difflayer` 主动 invalidate** 提前清走。再把 cap 从 40M 加到 80M 也**无效**（cache 根本触不到 40M 上限）。真正的杠杆见 §4.3.6。
 
 ---
 
@@ -561,16 +563,18 @@ moka 在全局贡献 = fallthrough 比例 × moka 自己命中率
 
 ```
 [moka admission]
-  node_admit_pct       : 100%                 ← admission 全通过，不是拒收
-  trie_cache_entries   : avg=24M / cap=40M    ← cache 没满，不是容量不够
-  node_insert_attempted: avg=23k 每块         ← 每秒 ~50k 新 entry 涌入
+  node_admit_pct       : 100%                       ← admission 入口全通过，不是拒收
+  trie_cache_entries   : avg=24M  p999=26M / cap=40M ← 稳定 24-26M，远未触达 cap
+  node_insert_attempted: avg=23k 每块               ← 每秒 ~50k 新 entry 涌入
 ```
 
-在 cache 没满、admission 100% 通过的前提下 hit rate 仍然只有 55%，三种可能原因：
+**这是关键观察**：cache 用量全程卡在 24-26M，**永远不碰 40M 上限**。加上 hit rate 只有 54.8%，说明 entries 不是"因为容量满被 LRU 淘汰"，而是**在 cache 还没满的时候就被提前清走了**。原因有三个叠加：
 
-1. **workload 内在冷数据长尾**：300k 地址池，每块只触达 ~1100 个独立账户。那些 **超过 256 块没被触达** 的账户，首次 read 必然 miss DiffLayer 和 moka，打到 RocksDB。这条 workload-driven，改架构无用
-2. **commit 阶段海量新 insert 挤走老热节点**：每块 23k 新写入，TinyLFU 按频次淘汰时可能把"几块没访问但其实快要回来"的热节点当冷数据扔掉
-3. **storage trie internal 节点没被持久"钉住"**：37 个热合约的根节点 + 第一层 FullNode 是最该热的，但 moka 一视同仁，某个合约偶尔不访问就可能被挤出
+1. **moka 的 TinyLFU 频次淘汰（非 LRU）**：moka 默认用 W-TinyLFU，会统计每条 entry 的访问频次。当新 entry 插入时，TinyLFU 比较新老 entry 的频次分布——访问几次但"相对冷"的 entry 可能被从主 segment 直接挤出。这个淘汰**不需要 cache 满**就能触发
+2. **`commit_difflayer` 的主动 invalidate**：每块 commit 时，triedb 把新写入的节点放进 DiffLayer，对应的老节点（相同 path、不同 hash）会被**主动从 moka invalidate**。每块 23k 新 insert 意味着潜在 23k 次 invalidate——entries 活不到被容量淘汰，先被主动删了
+3. **workload 长尾**：300k 地址池，每块只触达 ~1100 独立账户，平均 ~600 块才重访一次。即使 moka 不主动淘汰，600 块在 TinyLFU 里也会被降频到"冷"段，下次再新 insert 就会被挤出
+
+**推论**：**容量不是瓶颈**。单纯把 cap 从 40M 加到 80M **几乎不会有效果**——cache 连 40M 都填不满，多出来的 40M 是空的。正确的杠杆在 §4.3.6 选项 B（减少 `commit_difflayer` invalidate）、选项 C（启动预热骨干）和选项 D（按节点类型 weigher）。
 
 #### 4.3.5 收益量化
 
@@ -597,20 +601,27 @@ reth-bsc.2700-symbolized.svg:
 
 #### 4.3.6 优化手段（按成本从低到高）
 
-##### 选项 A：加大 `RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES`（零代码）
+##### ~~选项 A：加大 `RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES`~~（**已证无效，不要做**）
 
-启动参数从 40M 加到 80M 或 160M：
+曾经的直觉方案：cap 从 40M 加到 80M。实测 `trie_cache_entries` avg/p999 都在 24-26M，**根本摸不到 40M 上限**（§4.3.4），所以加大 cap 无用。容量**不是**瓶颈。
 
-```bash
-RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES=80000000
-```
+如果一定要验证一次，把启动参数调到 80M 跑一轮。预测：stage_07 hit rate 依旧 ~55%，`trie_cache_entries` 依旧 ~25M。跑完删掉这条。
 
-**代价**：每条 entry ~350B，80M 条约 28 GB 内存（vs 现在 40M × 350B = 14 GB）
-**预期**：如果工作集真的比 40M 大，扩容能让老热节点留得更久；hit rate 可能 54.8% → 70-80%
-**风险**：零。一个启动参数改动，压测完不行就回退
-**验证**：下一次压测看 stage_07 moka hit rate 和 `trie_cache_entries avg` 是否涨到接近 cap
+##### 选项 B：审计并减少 `commit_difflayer` 的 invalidate（半天-2 天）
 
-##### 选项 B：启动时预热 37 个热合约的 storage trie（半天）
+每块 commit 时，pathdb 对新写入 DiffLayer 的节点在 moka 里 invalidate 对应 entry。每块 ~23k 次 invalidate，是 entries 没活到重用就被踢的主因之一（§4.3.4 原因 2）。
+
+检查点：
+- `reth-bsc-triedb/db/pathdb/src/pathdb.rs` 里 `commit_difflayer` 函数，搜索 `invalidate` 或 `moka.remove` 调用
+- 判断被 invalidate 的节点是不是**真的不再会被读到**（例如：如果 DiffLayer 优先级高于 moka，老 hash 的节点即使留在 moka 也不会被读错；那 invalidate 就是纯防御性开销）
+- 如果 invalidate 确实是防御性的（DiffLayer 已经屏蔽了老 hash），可以**去掉**或改成 TTL 淘汰
+
+**代价**：1-2 天代码 + canonical replay 验证 state root 一致
+**预期**：entries 存活时间显著延长；stage_07 hit rate 54.8% → 70-80%
+**风险**：中。如果判断错了让 stale 节点被读到，会产生错误 state root（canonical replay 会立即抓到）
+**验证**：pathdb 跑一组单测 + 100k 块 canonical replay；压测对比 hit rate
+
+##### 选项 C：启动时预热 37 个热合约的 storage trie 骨干（半天）
 
 reth-bsc 启动后、挖矿前，遍历一次所有已知热合约的 storage trie 根节点 + depth-1 内部节点，主动 `touch` 进 moka：
 
@@ -622,12 +633,14 @@ for contract in HOT_CONTRACTS {
 }
 ```
 
-**代价**：<100 行代码，单次启动多耗几秒；cache 固定占用 +几千条 entry（可忽略）
-**预期**：stage_07 hit rate 提 3-5%，冷启动后第一块 triedb_calc 也变快
+重点是：这些骨干节点因为启动时"主动访问"进入 moka 的频次计数器，TinyLFU 之后再遇到"新 entry 要挤老 entry"的判决时，会认为这些骨干"频次高"不淘汰。
+
+**代价**：<100 行代码，单次启动多耗几秒；cache 固定占用 +几千条（可忽略）
+**预期**：stage_07 hit rate 提 3-5%；第一块 triedb_calc 也变快
 **风险**：低。只是读，不改数据
 **验证**：第一块 triedb_calc_ms 从 50-60ms 降到 20-30ms
 
-##### 选项 C：给 moka 加 weigher，按节点类型分权重（1 周）
+##### 选项 D：给 moka 加 weigher，按节点类型分权重（1 周）
 
 moka 支持 `weigher` 函数，可以给不同 entry 不同权重：
 
@@ -648,27 +661,35 @@ Cache::builder()
 这样淘汰时优先砍叶子节点，保留骨干结构，模拟 "pinned hot contract" 的效果。
 
 **代价**：~1 周。需要给 TrieNode 加 `kind()` 方法；修 PathDB 的 cache 构造；修 moka cap 单位从 "count" 到 "weight"；回归测试
-**预期**：stage_07 hit rate 54.8% → 80-90%；加上选项 A 可达 90%+
+**预期**：stage_07 hit rate 54.8% → 80-90%；与选项 B / 选项 C 叠加可达 90%+
 **风险**：中。weigher 写错可能让 cache 行为退化；需要 canonical replay 验证状态根一致
 **验证**：压测对比 hit rate；flamegraph 看 `PathDB::get_trie_node` 降幅
 
-##### 选项 D：独立 clean cache / L1-L2 cache（❌ 不推荐）
+##### 选项 E：独立 clean cache / L1-L2 cache（❌ 不推荐）
 
 历史多次尝试（见 `./related/reth-bsc-vs-geth-bsc-final-summary.md` §6.3 的 "Independent clean_cache"），**实测负优化**——加一层 lookup 开销 > 提升的命中率。不建议走这条。
 
 #### 4.3.7 推荐顺序
 
 ```
-Phase 0.5（和 Phase 1 并行做）：
-  ├─ 选项 A（80M cache）        ← 改启动参数，零代码
-  └─ 选项 B（启动预热热合约）   ← 半天开发
+Phase 0.5（和 Phase 1 并行）：
+  └─ 选项 C（启动预热热合约）   ← 半天代码，零风险，先做
 
-如果 Phase 0.5 把 stage_07 hit rate 推到 80%+ 就收工
-否则再走：
-  └─ 选项 C（按节点类型 weigher）   ← 1 周
+Phase 0.8（评估后）：
+  └─ 选项 B（审计 commit_difflayer invalidate）
+         ↑ 潜在 +15% hit rate，但需要 canonical replay 验证
+
+如果 Phase 0.5 + 0.8 把 stage_07 hit rate 推到 80%+ 就收工；否则再走：
+  └─ 选项 D（按节点类型 weigher）  ← 1 周
+
+选项 A（加大 cap 到 80M）:  ⚠️ 不做（§4.3.4 已证无效）
+选项 E（独立 clean cache）:  ❌ 历史负优化
 ```
 
-**测试方法**：每做一个变更跑一轮 2500-2700 TPS 压测，对比 `overall hit rate`、`cache_misses per block`、flamegraph 里 `PathDB::get_trie_node` 的 CPU 占比。hit rate 是否真的推上去一看便知。
+**测试方法**：每做一个变更跑一轮 2500-2700 TPS 压测，对比三个信号：
+- `overall hit rate`（54.8% 起步，目标 80%+）
+- `trie_cache_entries avg`（如果做了选项 B 让 entries 活更久，这个应该从 24M 涨到接近 cap）
+- flamegraph 里 `PathDB::get_trie_node` 的 CPU 占比（6.3% 起步，目标 <3%）
 
 ---
 
@@ -677,15 +698,16 @@ Phase 0.5（和 Phase 1 并行做）：
 | 阶段 | 改动 | 预期 TPS | 工作量 | 风险 |
 |---|---|---|---|---|
 | 已完成 | `fix/timestamp-drift` + 新启动参数 | 2700 | — | 已验证 |
-| **Phase 0.5** | **Cache 加大到 80M + 启动预热热合约 (§4.3 选项 A + B)** | **~2850** | **半天** | **几乎零** |
-| Phase 1 | DiffLayers Bloom filter (§4.1 选项 A) | **~2950** | 1-2 天 | 几乎零 |
-| Phase 2 | asm-keccak 审计 + Batch DiffLayer 写入 (§4.2 选项 1+4) | **~3050** | 1 周 | 低 |
-| Phase 3 | 流式 RLP + 增量 keccak (§4.2 选项 2) | **~3180** | 1 周 | 中 |
-| Phase 4 | moka weigher 按节点类型分权重 (§4.3 选项 C) | **~3280** | 1 周 | 中 |
-| Phase 5 | Committer Arc::make_mut (§4.2 选项 3) | **~3380** | 2 周 | 中 |
-| Phase 6（可选） | DiffLayers merged index (§4.1 选项 B) — 只在前 5 条不够时考虑 | **~3500** | 2-3 周 | 高 |
+| **Phase 0.5** | **启动预热 37 个热合约骨干 (§4.3 选项 C)** | **~2780** | **半天** | **零** |
+| Phase 0.8 | 审计并精简 `commit_difflayer` invalidate (§4.3 选项 B) | **~2900** | 1-2 天 | 中（canonical replay 验证） |
+| Phase 1 | DiffLayers Bloom filter (§4.1 选项 A) | **~3000** | 1-2 天 | 几乎零 |
+| Phase 2 | asm-keccak 审计 + Batch DiffLayer 写入 (§4.2 选项 1+4) | **~3100** | 1 周 | 低 |
+| Phase 3 | 流式 RLP + 增量 keccak (§4.2 选项 2) | **~3230** | 1 周 | 中 |
+| Phase 4 | moka weigher 按节点类型分权重 (§4.3 选项 D) | **~3330** | 1 周 | 中 |
+| Phase 5 | Committer Arc::make_mut (§4.2 选项 3) | **~3430** | 2 周 | 中 |
+| Phase 6（可选） | DiffLayers merged index (§4.1 选项 B) — 只在前 5 条不够时考虑 | **~3550** | 2-3 周 | 高 |
 
-**目标 3000 TPS 用 Phase 0.5 + Phase 1 + Phase 2 即可达到**（约 1 周工作量）。Phase 0.5 是纯启动参数 + 半天代码，建议**下次压测顺便跑一下**。
+**目标 3000 TPS**：Phase 0.5 + Phase 0.8 + Phase 1 组合即可达到（累计约 3-4 天工作量）。Phase 0.5 是半天纯代码无验证负担，**下一轮压测顺便上**；Phase 0.8 需要 canonical replay 验证，独立 PR。
 
 **追 3500 TPS 需要完整路线图** + 可能还需要对比 geth-bsc 的 profile 找剩余长尾。
 
@@ -704,11 +726,12 @@ Phase 0.5（和 Phase 1 并行做）：
 
 | Phase | 验收通过的 SVG/report 特征 | 对照基线 |
 |---|---|---|
-| Phase 0.5（cache 加大 + 预热） | stage_07 `overall hit rate` 从 54.8% → 70-80%，`PathDB::get_trie_node` 从 6.3% → ~3% | §4.3.5 |
+| Phase 0.5（启动预热骨干） | 第一块 `triedb_calc_ms` 从 50-60 → 20-30ms；stage_07 hit rate +3-5% | §4.3 选项 C |
+| Phase 0.8（精简 invalidate） | `trie_cache_entries avg` 从 24M 涨到 35M+；stage_07 hit rate → 70-75% | §4.3 选项 B |
 | Phase 1（Bloom） | `DiffLayers::get_trie_nodes` 从 13-16% → 2-3% | §4.1 |
 | Phase 2（asm-keccak + batch） | `Hasher::hash` 从 32-42% → 25-35% | §4.2 |
 | Phase 3（流式 RLP） | `Hasher::hash` 再下降 5-8%，`Arc::drop_slow` 可能也降 | §4.2 选项 2 |
-| Phase 4（moka weigher） | stage_07 hit rate → 88-92%，`PathDB::get_trie_node` → <2% | §4.3 选项 C |
+| Phase 4（moka weigher） | stage_07 hit rate → 88-92%，`PathDB::get_trie_node` → <2% | §4.3 选项 D |
 | Phase 5（Arc::make_mut） | `Arc::drop_slow` 从 12% → <5% | §4.2 选项 3 |
 
 同时 stage_report 的 `blocks over 450ms` 比例每 Phase 需下降至少 10 个百分点。
