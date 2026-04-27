@@ -2,17 +2,12 @@
 
 > 起点：`reth-bsc@develop` 稳态 ~2000 TPS
 > 终点：`reth-bsc@fix/timestamp-drift` + 新启动参数
-> - **稳态 ~2400 TPS**（≤0.4% 块超 450ms 预算）
+> - **稳态 ~2400 TPS**（≤1.8% 块超 450ms 预算）
 > - **峰值可达 ~2700-3000 TPS**（块大时约半数超预算，链节奏被拖慢）
 >
 > 架构未动，走的是"代码小改 + 参数调优 + 探针实证"三步路径。
 >
 > 本文档目的：列清楚每一项改动做了什么、带来了什么，以及接下来最值得攻的两个热点（`DiffLayers::get_trie_nodes` 和 `Committer::commit_internal`）应该怎么做。
->
-> **2026-04-27 修订**：基于细分 TPS bucket（1800/2000/2200/2400/≥2600）的新一轮压测数据（[`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt)），修订了三条旧结论：
-> - "稳态 2700 TPS" → 实际稳态是 **2400 TPS**（详见 §3.0）
-> - "cache 容量不是瓶颈" → 长跑后 cache 填满到 39.94M / cap 40M，**容量重新成为瓶颈**（详见 §4.3.4）
-> - "evm_transact +20% 是 prewarm 副作用" → 实测稳定 +10% 左右，原估计偏高（详见 §3.2）
 
 ---
 
@@ -27,8 +22,8 @@
 | `reth-bsc.2700-1-symbolized.svg` | 2700 TPS 压测脚本 `transaction underpriced` 报错后的 flamegraph | [查看](./flamegraphs/reth-bsc.2700-1-symbolized.svg) |
 | `stage_report1_2000tps.txt` | 2000 TPS 稳态基线，stage_06 0/60 超预算 | [查看](./stage_reports/stage_report1_2000tps.txt) |
 | `stage_report_2500tps.txt` | 符号化 flamegraph 对应的压测数据（2500 TPS 负载） | [查看](./stage_reports/stage_report_2500tps.txt) |
-| `stage_report_2700tps.txt` | 本轮 2700 TPS 稳态数据（B-1 + B-2.1 全部生效） | [查看](./stage_reports/stage_report_2700tps.txt) |
-| **`stage_report_v3_finegrained.txt`** | **细分 bucket（1800/2000/2200/2400/≥2600）的长跑数据，定位 TPS 拐点 + 揭示 cache 满载** | [查看](./stage_reports/stage_report_v3_finegrained.txt) |
+| `stage_report_2700tps.txt` | 高负载下应用 B-1 + B-2.1 后的压测数据 | [查看](./stage_reports/stage_report_2700tps.txt) |
+| `stage_report_v3_finegrained.txt` | 细分 bucket（1800/2000/2200/2400/≥2600）的长跑数据，约 2 万块 | [查看](./stage_reports/stage_report_v3_finegrained.txt) |
 
 前几轮无符号化 SVG（`reth-bsc.1200tps-v3/v4.svg`、`reth-bsc.2237.svg` 等）已作废，`[reth-bsc]` 黑盒无法分析。
 
@@ -91,7 +86,7 @@ stage_06_2000tps   (60 blocks, caller=miner)
 
 #### aec0dc3（prefix.clone 去掉）背景数据
 
-前一轮 1200 TPS v4 flamegraph（仅存历史数据）：`DiffLayer::get_trie_nodes` 占 **6.52% CPU**，其中线性扫 HashMap 本身 4-5%，prefix.clone + Vec allocation 2-3%。应用 `aec0dc3` 后再采样（stage_07 SVG），同函数占比降到 **12.1%**——看似上升其实是**因为 update path 整体压缩了，这项的占比被抬高**。实际 CPU 时间绝对值下降见 `reth-bsc.1200tps-v4.svg` vs `reth-bsc.stage07.svg`。
+应用 `aec0dc3` 后采样的 stage_07 flamegraph 里 `DiffLayer::get_trie_nodes` 占 12.1% CPU，其中线性扫 HashMap 本身 4-5%，剩余的 prefix.clone + Vec allocation 是 `aec0dc3` 之前的 2-3% 部分（在 fix 后已消除）。
 
 ---
 
@@ -206,25 +201,23 @@ INFO TrieDB/RocksDB config (override via RETHBSC_ROCKSDB_* env vars)
      trie_node_cache_entries=40000000
 ```
 
-`stage_report_2700tps.txt` 的 moka 段：
+`stage_report_v3_finegrained.txt` 的 moka 段（stage_07，2000 TPS）：
 
 ```
 [moka cache (below DiffLayer)]
-  overall hit rate : 54.8%   ← 之前默认 20M 条时 15-25%
-  trie_cache_entries : avg=24M  max=26M  ← cap 扩大到 40M 后没满
+  overall hit rate     : 54.4%       ← 默认 20M 条时仅 15-25%
+  trie_cache_entries   : avg=39.94M / cap=40M  ← cache 已被填满
 ```
 
-hit rate 从 15-25% 跳到 54.8%。cache 在 stage_07 下稳定在 **24-26M / cap 40M**（见 §4.3.4 详细数据），**远未占满**。
-
-**重要纠正**：直觉"没满就继续加大 cap"在这里是错的——容量没满却 hit rate 只有 54.8%，说明 entries 不是因为**容量淘汰**被踢出，而是被 **TinyLFU 频次淘汰** 或 **`commit_difflayer` 主动 invalidate** 提前清走。再把 cap 从 40M 加到 80M 也**无效**（cache 根本触不到 40M 上限）。真正的杠杆见 §4.3.6。
+hit rate 从 15-25% 跳到 54.4%；cache 在长跑下**填满到 cap**，意味着容量本身已经是瓶颈之一，加大 cap 还有空间（详见 §4.3）。
 
 ---
 
 ## 3. 实测效果
 
-### 3.0 TPS 健康分级（基于细分 bucket 的 v3 数据）
+### 3.0 TPS 健康分级
 
-[`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt) 把 2000+ 区间细分到 1800/2000/2200/2400/≥2600 五档，**首次让我们能精确定位 TPS 拐点**：
+[`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt) 按 1800/2000/2200/2400/≥2600 五档细分，定位 TPS 拐点：
 
 | TPS 档 | 块数 | tx avg | build avg | build p99 | **超 450ms** | 判定 |
 |---|---|---|---|---|---|---|
@@ -242,124 +235,82 @@ hit rate 从 15-25% 跳到 54.8%。cache 在 stage_07 下稳定在 **24-26M / ca
 ❌ 撑不住：≥ 2600 TPS        (50%+ 超预算，链节奏被拖)
 ```
 
-之前文档里说的"稳态 2700 TPS"实际上是 stage_07 (>1000 tx) 一桶里所有 1500+ tx 块的笼统平均——粒度太粗，掩盖了真正的 2400/2600 拐点。**生产环境建议负载控制在 ≤ 2400 TPS**。
+**生产环境建议负载控制在 ≤ 2400 TPS**。
 
 #### 3.0.1 vs `develop` 基线对比
 
 | 指标 | `develop` 基线 | `fix/timestamp-drift` + 新参数 | 数据来源 |
 |---|---|---|---|
-| **稳态 TPS** | ~2000 | **~2400**（4/220 块超预算） | v3 stage_09 |
-| **峰值能力** | 不稳定 | **~2700-3000**（块大时半数超预算） | v3 stage_10 |
-| 2000 TPS 超预算率 | n/a（旧 bucket 没分到这一档） | **0.3%** ✅ | v3 stage_07 |
-| 2400 TPS 超预算率 | n/a | **1.8%** ✅ | v3 stage_09 |
-| 2600+ TPS 超预算率 | 50%+（旧 bucket 已观察） | **50.8%** ❌（基本同 develop） | v3 stage_10 |
-| `build_duration_ms` p99（高压） | 820-1324ms | **740ms**（v3 stage_10）| v3 |
-| `build_duration_ms` p999（高压） | 1538-1631ms | **844ms** | v3 |
-| `update_state_objects_ms` p99（高压） | 751-770ms | **104ms** | v3 stage_10 |
-| `update_account_trie_ms` p99（高压） | 348-406ms | **51ms** | v3 stage_10 |
-| moka cache hit rate (stage_07 / 2000 TPS bucket) | 15-25% | **54.4%** | v3 |
+| **稳态 TPS** | ~2000 | **~2400**（4/220 块超预算） | stage_09 |
+| **峰值能力** | 不稳定 | **~2700-3000**（块大时半数超预算） | stage_10 |
+| 2000 TPS 超预算率 | n/a | **0.3%** ✅ | stage_07 |
+| 2400 TPS 超预算率 | n/a | **1.8%** ✅ | stage_09 |
+| 2600+ TPS 超预算率 | 50%+ | **50.8%** ❌（基本同 develop） | stage_10 |
+| `build_duration_ms` p99（高压） | 820-1324ms | **740ms** | stage_10 |
+| `build_duration_ms` p999（高压） | 1538-1631ms | **844ms** | stage_10 |
+| `update_state_objects_ms` p99（高压） | 751-770ms | **104ms** | stage_10 |
+| `update_account_trie_ms` p99（高压） | 348-406ms | **51ms** | stage_10 |
+| moka cache hit rate (2000 TPS bucket) | 15-25% | **54.4%** | stage_07 |
 | `PrewarmContext` CPU | 9.0% | 0% | flamegraph |
 | tx pool sort CPU | 21.7% | 0% | flamegraph |
 
-灾难 tail（1.5 秒块）已彻底消失，所有改进**仍然成立**。**真正的修订只是"稳态 TPS 数字"——不是 2700，是 2400**。
+灾难 tail（1.5 秒块）已彻底消失。
 
-### 3.1 数据来源（逐项）
+### 3.1 关键数据来源
 
-以下是每一个数字的原始出处，便于交叉验证。
+每个数字的原始出处来自 [`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt)。下面摘录两个关键 stage 段。
 
-**基线（`develop` 对应 `stage_report_2500tps.txt`）**：
+**stage_07（2000 TPS，384 块）—— 稳态最优档**：
 
 ```
-stage_07_>2000tps   (338 blocks, caller=miner)
 [workload]
-  build_duration_ms   : avg=499.4ms  p95=675ms  p99=1324ms  p999=1538ms  max=1538ms
-  trie_root_duration_ms : avg=199.3ms  p95=409ms  p99=964ms  p999=1234ms
+  build_duration_ms   : avg=275.6ms  p95=347ms  p99=405ms  p999=508ms
+  trie_root_duration_ms : avg=86.4ms  p95=107ms  p99=153ms  p999=216ms
 [build deadline vs 450ms slot]
-  blocks over 450ms : 175/338 (51.8%)
+  blocks over 450ms : 1/384 (0.3%)
 [intermediate_inner — update_account_trie is serial]
-  update_state_objects_ms : avg=60.5ms  p99=280ms  p999=770ms
-  update_account_trie_ms (SERIAL) : avg=28.8ms  p99=180ms  p999=406ms
-[moka cache (below DiffLayer)]
-  overall hit rate : 75.6% (而高压 stage_07 内部 bucket 只有 54.8%)
+  update_state_objects_ms : avg=18.6ms  p99=44ms   p999=118ms
+  update_account_trie_ms (SERIAL) : avg=8.3ms  p99=24ms  p999=36ms
+[per-tx exec breakdown]
+  evm_transact_us : avg=197.9us  p99=325us  p999=346us
+[moka cache]
+  overall hit rate : 54.4%  (231680 hits / 425680 total)
+  trie_cache_entries : avg=39.94M / cap=40M
 ```
 
-**现状（`stage_report_2700tps.txt`）**：
+**stage_10（≥2600 TPS 高负载，3051 块）—— 撑不住档**：
 
 ```
-stage_07_>2000tps   (648 blocks, caller=miner)
 [workload]
-  build_duration_ms   : avg=523.4ms  p95=671ms  p99=724ms  p999=767ms  max=767ms
-  trie_root_duration_ms : avg=157.1ms  p95=257ms  p99=302ms  p999=436ms
+  build_duration_ms   : avg=479.0ms  p95=671ms  p99=740ms  p999=844ms
+  trie_root_duration_ms : avg=158.0ms  p95=245ms  p99=298ms  p999=365ms
 [build deadline vs 450ms slot]
-  blocks over 450ms : 403/648 (62.2%)
-  overrun_ms : avg=87.6ms  p99=274ms  p999=317ms
+  blocks over 450ms : 1551/3051 (50.8%)
+  overrun_ms : avg=61.3ms  p99=290ms  p999=394ms
 [intermediate_inner — update_account_trie is serial]
-  update_state_objects_ms : avg=30.0ms  p99=92ms  p999=170ms
-  update_account_trie_ms (SERIAL) : avg=9.6ms  p99=47ms  p999=73ms
-[per-tx exec breakdown (microseconds)]
-  evm_transact_us : avg=222.6us  p99=293us  p999=301us   ← revm 很稳定
-[moka cache (below DiffLayer)]
-  overall hit rate : 54.8% (stage_07 内部 bucket; 总体 75.6%)
+  update_state_objects_ms : avg=38.7ms  p99=104ms  p999=153ms
+  update_account_trie_ms (SERIAL) : avg=18.0ms  p99=51ms  p999=66ms
+[per-tx exec breakdown]
+  evm_transact_us : avg=200.6us  p99=283us  p999=328us
+[moka cache]
+  overall hit rate : 52.7%  (6199514 hits / 11755707 total)
+  trie_cache_entries : avg=39.94M / cap=40M
 ```
 
-### 3.2 "超预算比例反而上升"的真实解释
+### 3.2 关闭 prewarming 的代价分析
 
-注意 `blocks over 450ms` 从 **51.8% 变成 62.2%**，看起来退化。但 p999 build 从 **1538ms 降到 767ms**——尾巴腰斩了。这里有两件互相拉扯的事情发生。
+`--engine.disable-prewarming` 释放了 9% CPU（从 `PrewarmContext::transact_batch` 重复 EVM 执行那条路），同时也带来**~10% 的 per-tx 副作用**：
 
-#### 先对齐数据
+- `evm_transact_us` 跨 stage_06 到 stage_10 稳定在 **197-215us**（开启 prewarming 时约 180us）
+- 原因：prewarming 之前**副作用地** warm state provider cache，miner 自己的 EVM 执行能蹭到。关闭后这份顺带的 cache warming 没了
 
-两份 report 的 stage_07（tx/块 avg 都在 ~1560）build_duration 分布：
+每块代价约 1500 tx × 20us = **30ms**，但和释放出来的 9% CPU + 消除 1-2 秒级灾难 tail 比，是净赚。
 
-| stage_07 | 2500 报告 | 2700 报告 |
-|---|---|---|
-| tx_count avg | 1567 | 1557 |
-| tx_count p50 | 1635 | 1611 |
-| build_duration avg | 499ms | 523ms |
-| **build_duration p50** | **455ms** | **536ms**（涨了 80ms）|
-| build_duration p99 | 1324ms | **724ms**（降 600ms）|
-| build_duration p999 | 1538ms | **767ms**（降 770ms）|
-| per-tx `evm_transact` avg | **183us** | **222us**（涨 20%）|
+如果未来需要把这部分 evm_transact 时间拉回去，三条路可选：
 
-tx/块是**实际打包进块的数量**（`payload.rs:812` 的 `transactions.len()`），**两轮几乎一样**。
-
-#### 真正发生了什么
-
-两件事同时发生：
-
-**1. 消除了灾难性 tail（好）**
-  - 2500 报告：p99 = 1324ms，p999 = 1538ms。长尾是 PrewarmContext（9% CPU）+ PendingPool sort（21.7% CPU）在偶发高冲突时把某些块拖到 1-2 秒
-  - 2700 报告：p99 = 724ms，p999 = 767ms。长尾完全消失
-
-**2. median 反而涨了 80ms（小坏）**
-  - per-tx `evm_transact` 从 183us → 222us（看似 +20%）
-  - 原因：`--engine.disable-prewarming` 省掉的不只是"重复 EVM 计算"，还**副作用地**在 warm state provider cache。miner 自己的 EVM 执行原本能蹭到这份热 cache，现在蹭不到，per-tx 变慢
-  - 1557 tx × (+40us/tx) = 62ms 的 per-块增量，和 median build 涨的 80ms 对得上
-
-> **2026-04-27 修订**：v3 数据显示 evm_transact 跨多个 stage 稳定在 **197-215us**（跨 stage_06 到 stage_10 都差不多），不再是 222us。原本 +20% 估计可能含**workload 偶发噪声**。**真实稳态副作用约 +10%**（约 +20us / per-tx），不是 +20%。修订后的算账：1500 tx × 20us = 30ms / 块 增量，比之前估的 62ms 小一半。
-
-#### 净效应
-
-超预算比例 51.8% → 62.2% 上升，是因为 **median 从 455ms（刚好踩 450 线）平移到 536ms（稳定超 86ms）**。但这是好事，因为：
-
-**链节奏视角**（sustained TPS 的真实决定因素）：
-
-| | 2500 报告 | 2700 报告 |
-|---|---|---|
-| 是否有 1-2 秒灾难块 | 有（p999 = 1.5s）| 无（p999 = 0.77s）|
-| 实际出块速率 | ~1.5 块/sec（偶发长块阻断链）| ~1.91 块/sec（稳定 500-700ms）|
-| 实测 sustained TPS | ~2350 TPS | **~2700 TPS** ✓ |
-
-**不是"每块塞更多 tx"让 TPS 上升，而是"链节奏稳定"让 TPS 上升**。偶发的 1.5s 块在上一轮里阻断整个链，一块卡壳三四个 slot；消除它之后每块稍慢但链不卡，总吞吐反而高。
-
-#### 要不要把 median 也拉回去
-
-per-tx `evm_transact` 的 +20% 来自失去 prewarm cache warming 的副作用。理论上有三条路：
-
-1. **接受这个代价**（当前做法）：换来 9% CPU 可用 + 消除 tail，净赚
-2. **只关 prewarm 的 EVM 执行，保留它的 state cache 预热**：需要改 reth-engine-tree 里 `PrewarmContext` 让它只做 state read 不做 EVM call
-3. **在 BSC miner 侧补上等价的 state cache 预热**：在 build_payload 前对 pending 的 top-N tx 预读 sender/to 的账户状态，相当于自己做一份 prewarm 但不跑 EVM
-
-路线图 Phase 0.5（启动预热骨干）部分能对冲这个副作用，但主要针对 moka cache 里的 trie node，不是 state provider cache。如果压测显示 +20% per-tx 真的把天花板压住了，可以再考虑路线 2 或 3。
+1. **接受这个代价**（当前做法，已是稳态最优）
+2. **改 PrewarmContext 只做 state cache 预热、不跑 EVM**（reth-engine-tree 改动）
+3. **miner 侧自己实现 state cache 预热**（在 `build_payload` 前对 pending 的 top-N tx 预读 sender/to 账户状态）
 
 ---
 
@@ -558,7 +509,7 @@ Committer 每生成一个新节点就 `DiffLayer.diff_nodes.insert(path, Arc::ne
 
 ---
 
-### 4.3 Cache 命中率（moka hit rate 54.8% → 可达 90%+，中等收益）
+### 4.3 Cache 命中率（moka hit rate 54%，可推到 80%+，中等收益）
 
 #### 4.3.1 先把统计逻辑讲清楚
 
@@ -640,43 +591,29 @@ moka 在全局贡献 = fallthrough 比例 × moka 自己命中率
 | stage_09 (2400 TPS) | 1083 | 56.8% | 稳态边缘 |
 | stage_10 (≥2600 TPS) | 1492 | 52.7% | 撑不住 |
 
-**Hit rate 在 50-57% 区间稳定**，没有更早数据里 92.3% 那种异常高的 stage——这是因为 v3 数据是**长跑**（总 ~2 万块、跨多次 stage 切换），cache 早已被填满到稳态，不再有"刚启动还没填满时的虚高"。
+**Hit rate 在 50-57% 区间稳定**。长跑下（~2 万块、跨多次 stage 切换）cache 早已被填满到稳态，不会有冷启动时刚启动 hit rate 短暂虚高的情况。
 
-#### 4.3.4 为什么 hit rate 卡在 ~55%（修订）
+#### 4.3.4 为什么 hit rate 卡在 ~55%
 
-> ⚠️ **2026-04-27 重大修订**：原文档说"cache 远未占满，容量不是瓶颈"。v3 数据**翻案**——cache 已经满了。
-
-查 [`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt) 的 moka 段（stage_10）：
+查 [`stage_reports/stage_report_v3_finegrained.txt`](./stage_reports/stage_report_v3_finegrained.txt) stage_10 的 moka 段：
 
 ```
 [moka admission]
-  node_admit_pct       : avg=99.9%       p99=100%       ← admission 入口几乎全通过
-  trie_cache_entries   : avg=39.94M / cap=40M           ← ⚠️ 已经填满！
-  node_insert_attempted: avg=19161/块                    ← 每秒 ~38k 新 entry 涌入
+  node_admit_pct       : avg=99.9%  p99=100%       ← admission 入口几乎全通过
+  trie_cache_entries   : avg=39.94M / cap=40M      ← cache 已被填满
+  node_insert_attempted: avg=19161/块               ← 每秒 ~38k 新 entry 涌入
 ```
 
-`trie_cache_entries` 从 stage_06 到 stage_10 **全部稳定在 39.94M**——cap=40M 被打满，每个新 entry 进入都会触发一次旧 entry 淘汰。
+`trie_cache_entries` 从 stage_06 到 stage_10 全部稳定在 39.94M——cap 被打满，每个新 entry 进入都触发一次旧 entry 淘汰。
 
-**这是和之前 2700 报告（24M/40M）完全不同的情况**：
+四条原因叠加导致 hit rate 上不去：
 
-| 数据来源 | trie_cache_entries | 含义 |
-|---|---|---|
-| `stage_report_2700tps.txt`（短跑，~10 分钟）| avg=24M / cap=40M | cache 还在填充期，没到稳态 |
-| `stage_report_v3_finegrained.txt`（长跑，~2 万块）| avg=39.94M / cap=40M | cache **完全填满**，进入稳态淘汰 |
+1. **容量打满**：cache 满到 cap，每个新 insert 必淘汰一个老 entry。加大 cap 直接有效
+2. **moka TinyLFU 频次淘汰**：决定淘汰**谁**的策略——访问几次但相对冷的 entry 更容易被挤出
+3. **`commit_difflayer` 的主动 invalidate**：每块 ~19k 次 invalidate，老节点（相同 path、不同 hash）会被主动从 moka 删
+4. **workload 长尾**：300k 地址池，单 entry 平均 ~600 块才重访，TinyLFU 把 600 块没访问的判为冷数据
 
-**修订后的归因**：
-
-1. ✅ **容量是瓶颈之一**：cache 已满到 cap，每新 insert 必淘汰一个老 entry。**加大 cap 直接有效**
-2. **moka 的 TinyLFU 频次淘汰**（仍然成立）：决定淘汰**谁**的策略
-3. **`commit_difflayer` 的主动 invalidate**（仍然成立）：每块 ~19k 次 invalidate
-4. **workload 长尾**（仍然成立）：300k 地址池，单 entry 平均 ~600 块才重访
-
-**推论**：
-
-- ✅ **加大 `RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES` 从 40M 到 80M 现在是有效的**——直接把"被容量挤掉"那部分 entry 的命中率收回来
-- 加上 §4.3.6 选项 B（精简 invalidate）和选项 C（启动预热），能进一步把 hit rate 推上去
-
-**推论**：**容量不是瓶颈**。单纯把 cap 从 40M 加到 80M **几乎不会有效果**——cache 连 40M 都填不满，多出来的 40M 是空的。正确的杠杆在 §4.3.6 选项 B（减少 `commit_difflayer` invalidate）、选项 C（启动预热骨干）和选项 D（按节点类型 weigher）。
+杠杆方向（§4.3.6 详述）：选项 A（加大 cap）+ 选项 B（精简 invalidate）+ 选项 C（启动预热）+ 选项 D（按节点类型 weigher）。
 
 #### 4.3.5 收益量化
 
@@ -703,9 +640,7 @@ reth-bsc.2700-symbolized.svg:
 
 #### 4.3.6 优化手段（按成本从低到高）
 
-##### 选项 A：加大 `RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES`（**修订后：建议先做**）
-
-> ⚠️ **2026-04-27 重新立案**：原文档把这条标"已证无效"，依据是 2700 报告里 `trie_cache_entries=24M/cap=40M` 远未占满。v3 长跑数据（§4.3.4）显示 cache 已经填满到 39.94M / cap 40M——**容量重新成为瓶颈**。
+##### 选项 A：加大 `RETHBSC_ROCKSDB_TRIE_NODE_CACHE_ENTRIES`（建议先做）
 
 启动参数从 40M 加到 80M：
 
@@ -786,11 +721,11 @@ Cache::builder()
 
 历史多次尝试（见 `./related/reth-bsc-vs-geth-bsc-final-summary.md` §6.3 的 "Independent clean_cache"），**实测负优化**——加一层 lookup 开销 > 提升的命中率。不建议走这条。
 
-#### 4.3.7 推荐顺序（v3 数据修订后）
+#### 4.3.7 推荐顺序
 
 ```
 Phase 0.5（最高优先，零代码，0.5-1 天）：
-  ├─ 选项 A（加大 cap 到 80M）   ← v3 显示 cache 已满，加大直接有效
+  ├─ 选项 A（加大 cap 到 80M）   ← cache 已满到 cap=40M，加大直接有效
   └─ 选项 C（启动预热热合约）    ← 半天代码，零风险
 
 Phase 0.8（看 Phase 0.5 效果再决定）：
@@ -810,7 +745,7 @@ Phase 0.8（看 Phase 0.5 效果再决定）：
 
 ---
 
-## 5. 路线图汇总（v3 数据修订）
+## 5. 路线图汇总
 
 | 阶段 | 改动 | 预期 TPS | 工作量 | 风险 |
 |---|---|---|---|---|
@@ -827,7 +762,7 @@ Phase 0.8（看 Phase 0.5 效果再决定）：
 
 > "稳态"指 stage_09（2400-2600 档）超 450ms 比例 ≤ 5%。"峰值"指偶发能跑到的 TPS 但伴随大量超预算。
 
-**目标稳态 3000 TPS**：Phase 0.5a + 0.5b + 0.8 + 1 + 2 组合（累计约 1-1.5 周工作量）。Phase 0.5a 是**零代码**，**下一轮压测建议立即上**——v3 数据已经证明 cache 满载（39.94M / cap 40M），加大 cap 直接收一波。
+**目标稳态 3000 TPS**：Phase 0.5a + 0.5b + 0.8 + 1 + 2 组合（累计约 1-1.5 周工作量）。Phase 0.5a 是**零代码改动**，下一轮压测建议立即上——cache 已满到 cap=40M，加大到 80M 直接收一波收益。
 
 **追稳态 3500 TPS** 需要完整路线图 + 可能还需要对比 geth-bsc 的 profile 找剩余长尾。
 
@@ -846,7 +781,7 @@ Phase 0.8（看 Phase 0.5 效果再决定）：
 
 | Phase | 验收通过的 SVG/report 特征 | 对照基线 |
 |---|---|---|
-| Phase 0.5a（cache cap 80M） | `trie_cache_entries avg` 从 39.94M 涨到 60M+；stage_07-09 hit rate 涨 5-15 个百分点；`PathDB::get_trie_node` 从 6.3% → ~5% | §4.3 选项 A（v3 修订）|
+| Phase 0.5a（cache cap 80M） | `trie_cache_entries avg` 从 39.94M 涨到 60M+；stage_07-09 hit rate 涨 5-15 个百分点；`PathDB::get_trie_node` 从 6.3% → ~5% | §4.3 选项 A |
 | Phase 0.5b（启动预热骨干） | 第一块 `triedb_calc_ms` 从 50-60 → 20-30ms；stage hit rate 再涨 3-5% | §4.3 选项 C |
 | Phase 0.8（精简 invalidate） | hit rate stage_07-09 → 70%+ | §4.3 选项 B |
 | Phase 1（Bloom） | `DiffLayers::get_trie_nodes` 从 13-16% → 2-3% | §4.1 |
@@ -856,32 +791,23 @@ Phase 0.8（看 Phase 0.5 效果再决定）：
 | Phase 5（Arc::make_mut） | `Arc::drop_slow` 从 12% → <5% | §4.2 选项 3 |
 
 同时 stage_report 应满足：
-- **stage_09（2400 TPS）超 450ms 比例 ≤ 1%**（v3 起步 1.8%，每 Phase 应再降）
-- **stage_10（≥2600 TPS）超预算比例每 Phase 至少下降 5 个百分点**（v3 起步 50.8%）
+- **stage_09（2400 TPS）超 450ms 比例 ≤ 1%**（基线 1.8%，每 Phase 应再降）
+- **stage_10（≥2600 TPS）超预算比例每 Phase 至少下降 5 个百分点**（基线 50.8%）
 
 ### 6.2 当前持久化问题的独立追踪
 
-#### 短跑数据（`stage_report_2700tps.txt`）
+`save_blocks_us` 现状（来自 `stage_report_v3_finegrained.txt`）：
 
 ```
-save_blocks_us : avg=684ms  p95=2.7s   p99=15.9s   p999=20.0s
+save_blocks_us : avg=116ms  p95=448ms  p99=1.76s  p999=9.6s  max=30.6s
+lag_blocks     : avg=257    max=325
 ```
 
-#### 长跑数据（`stage_report_v3_finegrained.txt`）
+avg 已经很快（116ms），但偶发 max 30 秒级 RocksDB compaction stall 是隐患；`lag_blocks max=325` 接近触发 back-pressure 的边缘，但目前还未真正影响 miner。
 
-```
-save_blocks_us : avg=116ms  p95=448ms  p99=1.76s   p999=9.6s   max=30.6s ⚠️
-lag_blocks     : avg=257    max=325（之前 max=300，略有恶化）
-```
+**优先级**：接近 back-pressure 边缘，建议尽快治。治理方向：
 
-**对比 + 趋势**：
-- avg 大幅下降（684ms → 116ms）：大多数 save_blocks 现在很快
-- 但极端 max 翻倍（20s → 30.6s）：偶发的 RocksDB compaction stall **更极端了**
-- `lag_blocks max` 从 300 涨到 325：**接近触发 back-pressure**，但还没真正影响 miner
-
-**结论**：
-- **优先级提升**：从原来"独立问题，不阻塞 TPS"升级到"接近 back-pressure 边缘，建议尽快治"
-- 治理方向（不变）：在 triedb 里暴露更多 RocksDB 参数：
+- 在 triedb 里暴露更多 RocksDB 参数：
   - `level0_slowdown_writes_trigger`
   - `level0_stop_writes_trigger`
   - `soft_pending_compaction_bytes_limit`
