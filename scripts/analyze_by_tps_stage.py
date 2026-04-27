@@ -2,8 +2,21 @@
 """Analyze reth-bsc miner logs, bucketing blocks by TPS stage.
 
 Usage:
+  # Single file
   python3 analyze_by_tps_stage.py reth.log
   python3 analyze_by_tps_stage.py reth.log --caller miner
+
+  # Rotated logs (auto-discover): if reth.log.1, reth.log.2, ... exist next to
+  # reth.log they are automatically read in chronological order (oldest first).
+  python3 analyze_by_tps_stage.py reth.log
+
+  # Disable auto-discovery if you want only the named file:
+  python3 analyze_by_tps_stage.py reth.log --no-rotations
+
+  # Or pass an explicit list (any order; the script sorts by mtime ascending):
+  python3 analyze_by_tps_stage.py reth.log.5 reth.log.4 ... reth.log
+
+  # Gzipped rotations (.gz) are read transparently.
 
 Bucketing: each block is assigned to a TPS stage based on its user_tx_count
 (from the `Block payload built successfully` log line).  Buckets target
@@ -55,16 +68,66 @@ Probe changes since v1 (fix/timestamp-drift):
 """
 
 import argparse
+import gzip
+import os
 import re
 import statistics
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 KV = re.compile(r'(\w+)=(0x[0-9a-fA-F]+|"[^"]*"|[\w.]+)')
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
 DURATION_RE = re.compile(r'elapsed=([0-9.]+)(ns|µs|us|ms|s)\b')
 LAST_PERSISTED_RE = re.compile(r'last_persisted_block_number=(\d+)')
 BLOCK_COUNT_RE = re.compile(r'block_count=(\d+)')
+
+# `<base>.<digits>` (and optionally `.gz`). Matches typical logrotate output:
+#   reth.log, reth.log.1, reth.log.2, reth.log.3.gz ...
+ROTATION_RE = re.compile(r'^(?P<base>.+?)\.(?P<idx>\d+)(?P<ext>\.gz)?$')
+
+
+def discover_log_files(arg_path: str, max_idx: int = 100) -> list:
+    """Given a single log path (e.g. reth.log), discover its rotated siblings.
+
+    Convention: `reth.log` is the **active** file; `reth.log.1` is the most
+    recent rotation; `reth.log.N` (large N) is the oldest. We return all
+    existing files **oldest first** so they can be replayed in chronological
+    order, preserving stateful correlation (e.g. `last_block_seen` for triedb
+    breakdown logs that don't carry a block_number).
+    """
+    p = Path(arg_path)
+    if not p.exists() and not p.is_absolute():
+        # If user passed a non-existing path, just return as-is and let open()
+        # fail later with a normal error.
+        return [str(p)]
+
+    parent = p.parent if str(p.parent) else Path('.')
+    base_name = p.name
+
+    found = []
+    if p.exists():
+        found.append((0, p))    # active file = newest
+
+    # Sibling .1, .2, ..., .N (with or without .gz)
+    for i in range(1, max_idx + 1):
+        plain = parent / f"{base_name}.{i}"
+        gzipped = parent / f"{base_name}.{i}.gz"
+        if plain.exists():
+            found.append((i, plain))
+        elif gzipped.exists():
+            found.append((i, gzipped))
+
+    # Sort by index DESC so oldest (highest index) is first.
+    found.sort(key=lambda x: -x[0])
+    return [str(path) for _, path in found]
+
+
+def open_log(path: str):
+    """Open a log file (transparently handles .gz)."""
+    if path.endswith('.gz'):
+        return gzip.open(path, 'rb')
+    return open(path, 'rb')
 
 
 def parse_kv(line):
@@ -143,9 +206,38 @@ def parse_duration_us(line):
 # those two determine both the bucket and whether the block ever finished.
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("logfile", help="reth.log path")
+    ap.add_argument(
+        "logfile",
+        nargs='+',
+        help="reth.log path(s). If a single file is given, the script auto-discovers "
+             "its rotated siblings (reth.log.1, reth.log.2, ..., optionally .gz) in "
+             "the same directory and reads them oldest-first.",
+    )
     ap.add_argument("--caller", default="miner", choices=["miner", "import", "all"])
+    ap.add_argument(
+        "--no-rotations",
+        action="store_true",
+        help="Disable auto-discovery of rotated siblings. Only the named file(s) are read.",
+    )
     args = ap.parse_args()
+
+    # Resolve which files to read.
+    if len(args.logfile) == 1 and not args.no_rotations:
+        files = discover_log_files(args.logfile[0])
+    else:
+        # Explicit multi-file: sort by mtime ASC so older logs are processed
+        # first. This mirrors the rotation convention.
+        existing = [p for p in args.logfile if Path(p).exists()]
+        missing = [p for p in args.logfile if not Path(p).exists()]
+        existing.sort(key=lambda p: Path(p).stat().st_mtime)
+        files = existing + missing  # missing ones will error when opened
+
+    if len(files) > 1:
+        print(f"# Reading {len(files)} log files in chronological order:", file=sys.stderr)
+        for p in files:
+            sz = Path(p).stat().st_size if Path(p).exists() else 0
+            print(f"#   {p}  ({sz / 1024 / 1024:.1f} MB)", file=sys.stderr)
+        print(file=sys.stderr)
 
     # block_number -> {field: value, ...}
     per_block = defaultdict(dict)
@@ -170,164 +262,170 @@ def main():
             if k not in dst:
                 dst[k] = v
 
-    with open(args.logfile, 'rb') as f:
-        for raw in f:
-            try:
-                line = raw.decode('utf-8', errors='ignore')
-            except Exception:
-                continue
-            line = ANSI.sub('', line)
+    for log_path in files:
+        try:
+            log_fh = open_log(log_path)
+        except FileNotFoundError:
+            print(f"# WARN: skipping missing file: {log_path}", file=sys.stderr)
+            continue
+        with log_fh as f:
+            for raw in f:
+                try:
+                    line = raw.decode('utf-8', errors='ignore')
+                except Exception:
+                    continue
+                line = ANSI.sub('', line)
 
-            if "Block payload built successfully" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                if bn is not None:
-                    last_block_seen = bn
-                    if isinstance(bn, int) and bn > last_built_block_number:
-                        last_built_block_number = bn
-                merge(bn, {
-                    "tx_count": kv.get("tx_count", 0),
-                    "build_duration_ms": kv.get("build_duration_ms", 0),
-                    "prepare_duration_ms": kv.get("prepare_duration_ms", 0),
-                    "trie_root_duration_ms": kv.get("trie_root_duration_ms", 0),
-                    "avg_tx_duration_micros": kv.get("avg_tx_duration_micros", 0),
-                })
-                continue
+                if "Block payload built successfully" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    if bn is not None:
+                        last_block_seen = bn
+                        if isinstance(bn, int) and bn > last_built_block_number:
+                            last_built_block_number = bn
+                    merge(bn, {
+                        "tx_count": kv.get("tx_count", 0),
+                        "build_duration_ms": kv.get("build_duration_ms", 0),
+                        "prepare_duration_ms": kv.get("prepare_duration_ms", 0),
+                        "trie_root_duration_ms": kv.get("trie_root_duration_ms", 0),
+                        "avg_tx_duration_micros": kv.get("avg_tx_duration_micros", 0),
+                    })
+                    continue
 
-            if "build deadline snapshot" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                merge(bn, {
-                    "overrun_ms": kv.get("overrun_ms", 0),
-                    "deadline_used_pct": kv.get("deadline_used_pct", 0),
-                    "over_budget_count": 1 if kv.get("overrun_ms", 0) > 0 else 0,
-                })
-                continue
+                if "build deadline snapshot" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    merge(bn, {
+                        "overrun_ms": kv.get("overrun_ms", 0),
+                        "deadline_used_pct": kv.get("deadline_used_pct", 0),
+                        "over_budget_count": 1 if kv.get("overrun_ms", 0) > 0 else 0,
+                    })
+                    continue
 
-            if "state root breakdown" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                if bn is not None:
-                    last_block_seen = bn
-                fields = {}
-                # New probe: *_us fields as u64 microseconds.
-                for k in (
-                    "state_root_total_us",
-                    "executor_finish_us",
-                    "merge_transitions_us",
-                    "hashed_post_state_us",
-                    "prefetcher_finish_us",
-                    "to_triedb_state_us",
-                    "triedb_calc_us",
-                ):
-                    v = kv.get(k)
-                    if v is not None:
-                        # surface as ms with float precision so <1ms steps are visible
-                        fields[k.replace("_us", "_ms_f")] = float(v) / 1000.0
-                # Back-compat: older probe was *_ms (u128).
-                for k in (
-                    "state_root_total_ms",
-                    "executor_finish_ms",
-                    "merge_transitions_ms",
-                    "hashed_post_state_ms",
-                    "prefetcher_finish_ms",
-                    "to_triedb_state_ms",
-                    "triedb_calc_ms",
-                ):
-                    v = kv.get(k)
-                    if v is not None:
-                        fields[k] = v
-                merge(bn, fields)
-                continue
+                if "state root breakdown" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    if bn is not None:
+                        last_block_seen = bn
+                    fields = {}
+                    # New probe: *_us fields as u64 microseconds.
+                    for k in (
+                        "state_root_total_us",
+                        "executor_finish_us",
+                        "merge_transitions_us",
+                        "hashed_post_state_us",
+                        "prefetcher_finish_us",
+                        "to_triedb_state_us",
+                        "triedb_calc_us",
+                    ):
+                        v = kv.get(k)
+                        if v is not None:
+                            # surface as ms with float precision so <1ms steps are visible
+                            fields[k.replace("_us", "_ms_f")] = float(v) / 1000.0
+                    # Back-compat: older probe was *_ms (u128).
+                    for k in (
+                        "state_root_total_ms",
+                        "executor_finish_ms",
+                        "merge_transitions_ms",
+                        "hashed_post_state_ms",
+                        "prefetcher_finish_ms",
+                        "to_triedb_state_ms",
+                        "triedb_calc_ms",
+                    ):
+                        v = kv.get(k)
+                        if v is not None:
+                            fields[k] = v
+                    merge(bn, fields)
+                    continue
 
-            if "prefetch storage coverage" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                merge(bn, {
-                    "needed_storage_accounts": kv.get("needed_storage_accounts"),
-                    "prefetched_storage_tries": kv.get("prefetched_storage_tries"),
-                    "prefetched_storage_roots": kv.get("prefetched_storage_roots"),
-                    "coverage_pct": kv.get("coverage_pct"),
-                })
-                continue
+                if "prefetch storage coverage" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    merge(bn, {
+                        "needed_storage_accounts": kv.get("needed_storage_accounts"),
+                        "prefetched_storage_tries": kv.get("prefetched_storage_tries"),
+                        "prefetched_storage_roots": kv.get("prefetched_storage_roots"),
+                        "coverage_pct": kv.get("coverage_pct"),
+                    })
+                    continue
 
-            if "intermediate_and_commit breakdown" in line:
-                kv = parse_kv(line)
-                caller = kv.get("caller", "")
-                bn = last_block_seen
-                merge(bn, {k: kv.get(k) for k in (
-                    "total_ms", "state_at_ms", "intermediate_inner_ms", "commit_ms",
-                    "cache_hits", "cache_misses", "acct_misses", "stor_misses",
-                    "state_at_misses", "intermediate_misses", "commit_misses",
-                    "intermediate_stor", "commit_stor",
-                    "resolve_total", "resolve_difflayer_hit", "resolve_fallthrough",
-                    "difflayer_filter_pct",
-                    "difflayer_chain_depth", "difflayer_total_nodes",
-                ) if kv.get(k) is not None}, caller=caller)
-                continue
+                if "intermediate_and_commit breakdown" in line:
+                    kv = parse_kv(line)
+                    caller = kv.get("caller", "")
+                    bn = last_block_seen
+                    merge(bn, {k: kv.get(k) for k in (
+                        "total_ms", "state_at_ms", "intermediate_inner_ms", "commit_ms",
+                        "cache_hits", "cache_misses", "acct_misses", "stor_misses",
+                        "state_at_misses", "intermediate_misses", "commit_misses",
+                        "intermediate_stor", "commit_stor",
+                        "resolve_total", "resolve_difflayer_hit", "resolve_fallthrough",
+                        "difflayer_filter_pct",
+                        "difflayer_chain_depth", "difflayer_total_nodes",
+                    ) if kv.get(k) is not None}, caller=caller)
+                    continue
 
-            if "intermediate_inner breakdown" in line:
-                kv = parse_kv(line)
-                caller = kv.get("caller", "")
-                bn = last_block_seen
-                merge(bn, {k: kv.get(k) for k in (
-                    "update_state_objects_ms",
-                    "update_account_trie_ms",
-                    "account_hash_ms",
-                    "account_count",
-                ) if kv.get(k) is not None}, caller=caller)
-                continue
+                if "intermediate_inner breakdown" in line:
+                    kv = parse_kv(line)
+                    caller = kv.get("caller", "")
+                    bn = last_block_seen
+                    merge(bn, {k: kv.get(k) for k in (
+                        "update_state_objects_ms",
+                        "update_account_trie_ms",
+                        "account_hash_ms",
+                        "account_count",
+                    ) if kv.get(k) is not None}, caller=caller)
+                    continue
 
-            if "commit_inner breakdown" in line:
-                kv = parse_kv(line)
-                caller = kv.get("caller", "")
-                bn = last_block_seen
-                merge(bn, {k: kv.get(k) for k in (
-                    "commit_state_objects_ms",
-                    "storage_tries_count",
-                ) if kv.get(k) is not None}, caller=caller)
-                continue
+                if "commit_inner breakdown" in line:
+                    kv = parse_kv(line)
+                    caller = kv.get("caller", "")
+                    bn = last_block_seen
+                    merge(bn, {k: kv.get(k) for k in (
+                        "commit_state_objects_ms",
+                        "storage_tries_count",
+                    ) if kv.get(k) is not None}, caller=caller)
+                    continue
 
-            if "commit_difflayer moka admission" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                merge(bn, {k: kv.get(k) for k in (
-                    "node_insert_attempted",
-                    "node_insert_admitted",
-                    "node_admit_pct",
-                    "node_invalidated",
-                    "trie_cache_entries",
-                ) if kv.get(k) is not None})
-                continue
+                if "commit_difflayer moka admission" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    merge(bn, {k: kv.get(k) for k in (
+                        "node_insert_attempted",
+                        "node_insert_admitted",
+                        "node_admit_pct",
+                        "node_invalidated",
+                        "trie_cache_entries",
+                    ) if kv.get(k) is not None})
+                    continue
 
-            if "per-tx exec breakdown" in line:
-                kv = parse_kv(line)
-                bn = kv.get("block_number")
-                merge(bn, {k: kv.get(k) for k in (
-                    "exec_duration_ms",
-                    "avg_pre_exec_us", "avg_evm_transact_us", "avg_state_clone_us",
-                    "avg_prefetcher_hook_us", "avg_receipt_build_us", "avg_commit_us",
-                    "total_pre_exec_ms", "total_evm_transact_ms", "total_state_clone_ms",
-                    "total_prefetcher_hook_ms", "total_receipt_build_ms", "total_commit_ms",
-                ) if kv.get(k) is not None})
-                continue
+                if "per-tx exec breakdown" in line:
+                    kv = parse_kv(line)
+                    bn = kv.get("block_number")
+                    merge(bn, {k: kv.get(k) for k in (
+                        "exec_duration_ms",
+                        "avg_pre_exec_us", "avg_evm_transact_us", "avg_state_clone_us",
+                        "avg_prefetcher_hook_us", "avg_receipt_build_us", "avg_commit_us",
+                        "total_pre_exec_ms", "total_evm_transact_ms", "total_state_clone_ms",
+                        "total_prefetcher_hook_ms", "total_receipt_build_ms", "total_commit_ms",
+                    ) if kv.get(k) is not None})
+                    continue
 
-            if "Finished persisting, calling finish" in line:
-                m_lp = LAST_PERSISTED_RE.search(line)
-                dur_us = parse_duration_us(line)
-                if m_lp and dur_us is not None:
-                    last_persisted = int(m_lp.group(1))
-                    persistence["save_durations_us"].append(dur_us)
-                    persistence["last_persisted_history"].append(
-                        (last_built_block_number, last_persisted, dur_us)
-                    )
-                continue
+                if "Finished persisting, calling finish" in line:
+                    m_lp = LAST_PERSISTED_RE.search(line)
+                    dur_us = parse_duration_us(line)
+                    if m_lp and dur_us is not None:
+                        last_persisted = int(m_lp.group(1))
+                        persistence["save_durations_us"].append(dur_us)
+                        persistence["last_persisted_history"].append(
+                            (last_built_block_number, last_persisted, dur_us)
+                        )
+                    continue
 
-            if "Saving range of blocks" in line:
-                m_bc = BLOCK_COUNT_RE.search(line)
-                if m_bc:
-                    persistence.setdefault("save_block_counts", []).append(int(m_bc.group(1)))
-                continue
+                if "Saving range of blocks" in line:
+                    m_bc = BLOCK_COUNT_RE.search(line)
+                    if m_bc:
+                        persistence.setdefault("save_block_counts", []).append(int(m_bc.group(1)))
+                    continue
 
     # ------------------------------------------------------------------
     # Correlate per-block events into stages.
