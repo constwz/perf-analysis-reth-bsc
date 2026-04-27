@@ -329,6 +329,161 @@ DiffLayer 没命中后，moka cache 的命中情况。
 
 ---
 
+## 字段间的包含关系（避免常见困惑）
+
+不同 section 里的几个看起来"应该相等但实际不等"的字段，实际是**包含**关系。读报告时不搞清这层会得出错误结论。
+
+### 全局时间链
+
+```
+build_duration_ms (§1)
+├── prepare_duration_ms (§1)              ← 进入 build_payload 之前的准备
+├── exec_duration_ms (§12)                ← tx 循环全程
+│   └── 包含每笔 tx 的：
+│       pre_exec_us + evm_transact_us + state_clone_us
+│       + prefetcher_hook_us + receipt_build_us + commit_us  (§11)
+└── trie_root_duration_ms (§1)            ← finish_with_difflayer 整段
+    ├── (① state root 之前的工作: ~1-3ms)
+    │     executor_finish_us + merge_transitions_us  (§3)
+    ├── state_root_total (§3)             ← 真正的 state root
+    │   ├── hashed_post_state_us
+    │   ├── prefetcher_finish_us
+    │   ├── to_triedb_state_us
+    │   └── triedb_calc_us
+    │       └── ≈ total_ms (§4)           ← triedb 内部
+    │           ├── state_at_ms
+    │           ├── intermediate_inner_ms (§4) (= §8)
+    │           │   ├── update_state_objects_ms (§8)
+    │           │   ├── update_account_trie_ms (§8)
+    │           │   └── account_hash_ms (§8)
+    │           └── commit_ms (§4) (= §9)
+    │               └── commit_state_objects_ms (§9)
+    └── (③ state root 之后的工作: assemble_block_body_only ≈ 受 tx_count 影响)
+```
+
+### 重点关系 1：`trie_root_duration_ms` vs `state_root_total`
+
+**它们不相等，差值 = 区块组装的开销**。`trie_root_duration_ms` 这个名字来自早期版本，现在已经包含了远不止 state root 的工作。
+
+```
+trie_root_duration_ms ≥ state_root_total
+
+差值 ≈ executor.finish() + merge_transitions
+     + assemble_block_body_only           ← 主要在这里
+     + sink writes
+```
+
+`assemble_block_body_only` 要做：
+1. 把所有 tx RLP 编码成 block body
+2. 计算 receipts trie root
+3. 计算 transactions trie root
+4. 组装最终 sealed block
+
+对 1500+ tx 的大块，这部分能吃 30-50ms（**没有专门的探针**，只能从差值反推）。
+
+**实测对照**（[`stage_reports/stage_report_2700tps.txt`](./stage_reports/stage_report_2700tps.txt) stage_07）：
+
+```
+trie_root_duration_ms : avg=157.1ms   p99=302ms
+state_root_total      : avg=114.1ms   p99=293ms
+差值                   : avg ~43ms   ← 主要是 assemble_block_body_only
+```
+
+**怎么用**：
+- 想知道 state root 自己有多重 → 看 `state_root_total`（§3）
+- 想知道 state root + 区块组装总时间 → 看 `trie_root_duration_ms`（§1）
+- 想知道区块组装单独有多重 → `trie_root_duration_ms − state_root_total`
+- 这部分吃了 50ms+ 时，看 tx_count 是不是过大（每 tx ~25-30μs RLP 编码）
+
+### 重点关系 2：`triedb_calc_us` (§3) ≈ `total_ms` (§4)
+
+两个字段几乎相同，只是来自不同的探针：
+
+- **`triedb_calc_us`**：reth-bsc 侧测量，包裹 `triedb.intermediate_and_commit_hashed_post_state(...)` 调用。
+- **`total_ms`**：triedb 侧测量，从 `intermediate_and_commit` 函数入口到出口。
+
+差值通常 <0.1ms（FFI 边界开销可忽略）。两个值不一致 = 探针 bug，需要排查。
+
+### 重点关系 3：`intermediate_inner_ms` (§4) = §8 三项之和
+
+```
+intermediate_inner_ms = update_state_objects_ms + update_account_trie_ms + account_hash_ms
+```
+
+如果三项之和 ≠ `intermediate_inner_ms`，说明探针之间有"未被计入"的中间步骤，需要排查。实测一般差值 <1%。
+
+### 重点关系 4：`commit_ms` (§4) = `commit_state_objects_ms` (§9)
+
+§4 的 `commit_ms` 是从 triedb 侧 `intermediate_and_commit breakdown` 拿的，§9 的 `commit_state_objects_ms` 是从 `commit_inner breakdown` 拿的。它们指向同一段时间，应该相等（差值 <1ms）。
+
+### 重点关系 5：`cache_hits` + `cache_misses` (§6) ≈ `resolve_fallthrough` (§5)
+
+```
+resolve_total (§5) = resolve_difflayer_hit (§5) + resolve_fallthrough (§5)
+
+resolve_fallthrough (§5) = cache_hits (§6) + cache_misses (§6)
+                             ↑                ↑
+                         moka 内命中      最终打 RocksDB
+```
+
+实测可能差几条（DiffLayer hit 后的特殊路径），数量级一致即可。
+
+### 重点关系 6：全局命中率 vs 各层命中率
+
+**两个百分比的分母不同，不能直接相加**：
+
+```
+DiffLayer 命中率 = resolve_difflayer_hit / resolve_total            (§5, 分母 A)
+moka 命中率     = cache_hits / (cache_hits + cache_misses)          (§6, 分母 B = fallthrough)
+
+❌ 错：全局命中率 = DiffLayer 命中率 + moka 命中率
+✅ 对：全局命中率 = DiffLayer 命中率 + (1 − DiffLayer 命中率) × moka 命中率
+```
+
+实测例（stage_07，2700 TPS）：
+
+```
+DiffLayer 命中率 = 1255 / 3730 = 33.6%
+moka 命中率      = 1356 / 2475 = 54.8%
+
+全局命中率 = 33.6% + (1 − 0.336) × 54.8%
+        = 33.6% + 36.4%
+        = 70.0%   ← 不是 33.6 + 54.8 = 88%
+```
+
+### 重点关系 7：`exec_duration_ms` (§12) ≥ 各 `total_*_ms` (§12) 之和
+
+```
+exec_duration_ms ≥ total_pre_exec_ms
+                 + total_evm_transact_ms
+                 + total_state_clone_ms
+                 + total_prefetcher_hook_ms
+                 + total_receipt_build_ms
+                 + total_commit_ms
+```
+
+差值 = **tx 循环外的开销**，主要是：
+- `pool.next()` 取下一笔 tx 的迭代
+- 各种 validation（blacklist、gas tip、nonce 等）
+- blob 相关检查
+
+健康下差值 < 30ms。如果 `exec_duration_ms − sum(total_*) > 50ms`，说明循环开销过大（pool 慢、check 慢等）。
+
+### 关系速查表
+
+| 维度 | 关系 |
+|---|---|
+| 时间嵌套 | `build_duration ⊃ exec_duration + trie_root_duration` |
+| trie root 嵌套 | `trie_root_duration ⊃ state_root_total ⊃ triedb_calc ⊃ total_ms (§4)` |
+| triedb 内部 | `total_ms ≈ state_at + intermediate_inner + commit` |
+| state object | `intermediate_inner = update_state_objects + update_account_trie + account_hash` |
+| commit 同源 | `§4 commit_ms = §9 commit_state_objects_ms` |
+| trie 节点查询 | `resolve_total = difflayer_hit + fallthrough` |
+| moka 看到的查询 | `cache_hits + cache_misses = fallthrough` |
+| 全局命中率 | `1 − cache_misses / resolve_total` |
+
+---
+
 ## 快速诊断流程
 
 按这个顺序看 stage 报告，能在 2 分钟内定位 TPS 上限的根因：
