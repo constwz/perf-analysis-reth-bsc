@@ -9,13 +9,19 @@ Bucketing: each block is assigned to a TPS stage based on its user_tx_count
 (from the `Block payload built successfully` log line).  Buckets target
 200/400/800/1200/1500/2000 TPS at a 450 ms slot time:
 
-  <= 90  tx/block -> stage_01_<=200tps
-   91- 180        -> stage_02_400tps
-  181- 360        -> stage_03_800tps
-  361- 540        -> stage_04_1200tps
-  541- 700        -> stage_05_1500tps
-  701-1000        -> stage_06_2000tps
-  >1000           -> stage_07_>2000tps
+  <=  90 tx/block -> stage_01_<=200tps
+    91- 180       -> stage_02_400tps
+   181- 360       -> stage_03_800tps
+   361- 540       -> stage_04_1200tps
+   541- 700       -> stage_05_1500tps
+   701- 855       -> stage_06_1800tps
+   856- 945       -> stage_07_2000tps
+   946-1035       -> stage_08_2200tps
+  1036-1125       -> stage_09_2400tps
+  >1125           -> stage_10_>=2600tps
+
+  450ms slot 下：tx/block × (1/0.45) ≈ TPS。各 bucket 用相邻目标的中点作边界
+  （e.g. 2000↔2200 中点 = 2100 TPS = 945 tx），让每块自然落入最接近的目标值。
 
 Correlation:
   Many probe logs (state-root breakdown, per-tx exec breakdown, ...) are
@@ -102,9 +108,15 @@ def bucket_for(tx_count):
         return "stage_04_1200tps"
     if tx_count <= 700:
         return "stage_05_1500tps"
-    if tx_count <= 1000:
-        return "stage_06_2000tps"
-    return "stage_07_>2000tps"
+    if tx_count <= 855:
+        return "stage_06_1800tps"
+    if tx_count <= 945:
+        return "stage_07_2000tps"
+    if tx_count <= 1035:
+        return "stage_08_2200tps"
+    if tx_count <= 1125:
+        return "stage_09_2400tps"
+    return "stage_10_>=2600tps"
 
 
 def parse_duration_us(line):
