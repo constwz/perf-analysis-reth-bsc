@@ -8,16 +8,17 @@
 .
 ├── README.md                              ← 本文件（入口）
 ├── reth-bsc-2700tps-summary.md            ← ⭐ 主文档，从这里读
+├── stage-report-fields-reference.md       ← Stage 报告字段说明手册（看 stage_report*.txt 时配套）
 │
 ├── flamegraphs/                           ← perf 采样生成的带符号 SVG
 │   ├── reth-bsc.stage07.svg               ← 2500 TPS 负载，B-1/B-2.1 修复前
-│   ├── reth-bsc.2700-symbolized.svg       ← 2700 TPS 稳态（修复后，正常期）
-│   └── reth-bsc.2700-1-symbolized.svg     ← 2700 TPS 稳态（修复后，compaction 期）
+│   ├── reth-bsc.2700-symbolized.svg       ← 2700 TPS 稳态(修复后，正常期)
+│   └── reth-bsc.2700-1-symbolized.svg     ← 2700 TPS 稳态(修复后，compaction 期)
 │
 ├── stage_reports/                         ← analyze_by_tps_stage.py 的输出
 │   ├── stage_report1_2000tps.txt          ← 2000 TPS 基线
-│   ├── stage_report_2500tps.txt           ← 2500 TPS（首次符号化 SVG 对应）
-│   └── stage_report_2700tps.txt           ← 2700 TPS（B-1 + B-2.1 全部生效）
+│   ├── stage_report_2500tps.txt           ← 2500 TPS(首次符号化 SVG 对应)
+│   └── stage_report_2700tps.txt           ← 2700 TPS(B-1 + B-2.1 全部生效)
 │
 ├── scripts/
 │   └── analyze_by_tps_stage.py            ← 把 reth.log 聚合成分段 stage 报告
@@ -34,6 +35,7 @@
 |---|---|
 | 想知道 2000 → 2700 TPS 做了什么 | `reth-bsc-2700tps-summary.md` §1-§3 |
 | 想知道下一步怎么推到 3000 TPS | `reth-bsc-2700tps-summary.md` §4-§5 |
+| **看 stage 报告时不知道某字段什么意思** | **`stage-report-fields-reference.md`**（按字段名查）|
 | 想看 flamegraph 证据 | `flamegraphs/` 下三张 SVG，浏览器直接打开，交互式 |
 | 想复现本文档的数据 | `reth-bsc-2700tps-summary.md` §D 附录 |
 | 想知道之前的弯路 | `related/` 下的历史文档 |
