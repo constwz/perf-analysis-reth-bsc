@@ -20,7 +20,9 @@
 │   ├── stage_report_2500tps.txt           ← 2500 TPS(首次符号化 SVG 对应)
 │   └── stage_report_2700tps.txt           ← 2700 TPS(B-1 + B-2.1 全部生效)
 │
-├── scripts/
+├── scripts/                               ← 实测数据采集 + 分析工具
+│   ├── README.md                          ← 各脚本用法 + 完整压测流程
+│   ├── capture_flamegraph.sh              ← 对运行中的 miner 采符号化 flamegraph SVG
 │   └── analyze_by_tps_stage.py            ← 把 reth.log 聚合成分段 stage 报告
 │
 └── related/                               ← 本轮之前的历史分析文档
@@ -37,7 +39,8 @@
 | 想知道下一步怎么推到 3000 TPS | `reth-bsc-2700tps-summary.md` §4-§5 |
 | **看 stage 报告时不知道某字段什么意思** | **`stage-report-fields-reference.md`**（按字段名查）|
 | 想看 flamegraph 证据 | `flamegraphs/` 下三张 SVG，浏览器直接打开，交互式 |
-| 想复现本文档的数据 | `reth-bsc-2700tps-summary.md` §D 附录 |
+| **想自己采一张 flamegraph** | `scripts/capture_flamegraph.sh` + `scripts/README.md` |
+| 想复现本文档的数据 | `reth-bsc-2700tps-summary.md` §D 附录 + `scripts/README.md` 末尾"完整流程" |
 | 想知道之前的弯路 | `related/` 下的历史文档 |
 
 ## 涉及的代码仓库
